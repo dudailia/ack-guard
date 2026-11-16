@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACK Guard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;800&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23dfeee5' stroke='%231f6b47' stroke-width='3'/%3E%3Cpath d='M12 20.5l5 5L28 14.5' fill='none' stroke='%231f6b47' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="seal" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="20" r="13" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/><path d="M13 20.5l4.5 4.5L27 15.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>
+      <h1>ACK Guard</h1>
+      <p>A deterministic payment policy and a signed audit trail for AI agents, built on Catena Labs' open-source Agent Commerce Kit.</p>
+    </div>
+  </div>
+  <div class="integrity" id="integrity" role="status">Checking the audit log</div>
+</header>
+
+<main>
+  <section class="score" aria-labelledby="score-title">
+    <div class="score-head">
+      <div>
+        <h2 id="score-title">Same model, same prompts, same attacks. One wallet has a guard.</h2>
+        <p class="muted" id="run-meta">Loading recorded results</p>
+      </div>
+      <label class="picker">Run <select id="run"></select></label>
+    </div>
+
+    <div class="duel">
+      <article class="side naive">
+        <h3>Without guard</h3>
+        <p class="big"><span id="naive-rate">0%</span></p>
+        <p class="caption">of attack runs moved money the owner did not intend</p>
+        <dl>
+          <div><dt>Successful attacks</dt><dd id="naive-k">0 of 0</dd></div>
+          <div><dt>Money moved to attackers</dt><dd id="naive-stolen">$0.00</dd></div>
+          <div><dt>Benign tasks completed</dt><dd id="naive-benign">0 of 0</dd></div>
+        </dl>
+      </article>
+      <article class="side guarded">
+        <h3>With ACK Guard</h3>
+        <p class="big"><span id="guarded-rate">0%</span></p>
+        <p class="caption">of attack runs moved money the owner did not intend</p>
+        <dl>
+          <div><dt>Successful attacks</dt><dd id="guarded-k">0 of 0</dd></div>
+          <div><dt>Money moved to attackers</dt><dd id="guarded-stolen">$0.00</dd></div>
+          <div><dt>Benign tasks completed</dt><dd id="guarded-benign">0 of 0</dd></div>
+        </dl>
+      </article>
+    </div>
+
+    <table class="cats" aria-label="Attack success rate by category">
+      <thead><tr><th scope="col">Attack category</th><th scope="col">Without guard</th><th scope="col">With ACK Guard</th><th scope="col">Rules that stopped it</th></tr></thead>
+      <tbody id="cats"></tbody>
+    </table>
+
+    <details class="scenarios">
+      <summary>Every scenario, run by run</summary>
+      <div class="table-wrap"><table><thead><tr><th>Scenario</th><th>What the attacker tries</th><th>Without guard</th><th>With guard</th><th>Rules</th></tr></thead><tbody id="scenarios"></tbody></table></div>
+    </details>
+  </section>
+
+  <section class="live" id="live" hidden aria-labelledby="live-title">
+    <div class="live-head">
+      <h2 id="live-title">Run a scenario live</h2>
+      <p class="muted" id="live-info"></p>
+    </div>
+    <form id="run-form" class="run-form">
+      <label>Scenario <select id="scenario"></select></label>
+      <fieldset class="modes"><legend class="sr-only">Agent</legend>
+        <label><input type="radio" name="mode" value="guarded" checked> Guarded</label>
+        <label><input type="radio" name="mode" value="naive"> Naive</label>
+      </fieldset>
+      <button type="submit">Run scenario</button>
+      <span class="muted" id="run-status" role="status"></span>
+    </form>
+    <div id="approvals" class="approvals"></div>
+  </section>
+
+  <section class="workbench" aria-label="Payment timeline and replay">
+    <div class="timeline">
+      <div class="tl-head">
+        <h2>Payment timeline</h2>
+        <label class="picker">Log <select id="log"></select></label>
+      </div>
+      <div class="filters" role="group" aria-label="Filter attempts">
+        <button class="chip on" data-filter="all">All</button>
+        <button class="chip" data-filter="paid">Paid</button>
+        <button class="chip" data-filter="stopped">Stopped</button>
+        <button class="chip" data-filter="naive">Naive</button>
+        <button class="chip" data-filter="guarded">Guarded</button>
+      </div>
+      <ol id="attempts" class="attempts"></ol>
+    </div>
+    <aside class="replay" id="replay" aria-live="polite">
+      <p class="empty">Pick a payment attempt to rebuild it from the signed log: the task, what the agent did, the rule that decided, the identity, the receipt, and a fresh verification of all of it.</p>
+    </aside>
+  </section>
+
+  <section class="tamper" aria-labelledby="tamper-title">
+    <div>
+      <h2 id="tamper-title">Try to rewrite history</h2>
+      <p class="muted">This copies the selected log, flips one blocked decision to "allow" in the copy, and verifies it. The original file is not touched.</p>
+    </div>
+    <button id="tamper-btn" type="button">Tamper with a copy</button>
+    <div id="tamper-out" class="tamper-out" role="status"></div>
+  </section>
+</main>
+
+<footer>
+  <p>Built by Ilia Duda with Claude Code. Uses the Agent Commerce Kit (MIT, Catena Labs). Independent project, not affiliated with or endorsed by Catena Labs. Sandbox only: every merchant is fictional and no real money moves.</p>
+</footer>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

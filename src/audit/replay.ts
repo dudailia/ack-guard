@@ -65,6 +65,7 @@ export function listAttempts(path: string): AttemptSummary[] {
     const d = lastDecision.get(attemptId)
     const dec = d?.payload.decision as { outcome?: string; rule?: { id?: string }; merchant?: string; amount?: string } | undefined
     const settled = entries.some((x) => x.kind === "settlement" && x.payload.attemptId === attemptId)
+    const answered = entries.some((x) => x.kind === "approval" && x.payload.attemptId === attemptId)
     const t = tasks.get(e.payload.episodeId as string)
     out.push({
       attemptId,
@@ -72,7 +73,7 @@ export function listAttempts(path: string): AttemptSummary[] {
       mode: e.payload.mode as string,
       scenarioId: t?.payload.scenarioId as string | undefined,
       category: t?.payload.category as string | undefined,
-      outcome: settled ? "paid" : (dec?.outcome ?? "unknown"),
+      outcome: settled ? "paid" : dec?.outcome === "needs_approval" && !answered ? "awaiting_approval" : (dec?.outcome ?? "unknown"),
       rule: dec?.rule?.id ?? "?",
       amount: dec?.amount,
       merchant: dec?.merchant,
