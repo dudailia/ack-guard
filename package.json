@@ -20,7 +20,8 @@
     "check:secrets": "tsx scripts/check-secrets.ts",
     "check": "pnpm typecheck && pnpm test && pnpm check:em-dash && pnpm check:secrets",
     "spike": "tsx scripts/spike.ts",
-    "record-demo": "tsx scripts/record-demo.ts"
+    "record-demo": "tsx scripts/record-demo.ts",
+    "build:site": "tsx scripts/build-site.ts site"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.105",

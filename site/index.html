@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACK Guard demo</title>
+<meta name="description" content="A static replay of ACK Guard: one legitimate agent payment, one injected invoice blocked by a deterministic policy, and a tampered audit log caught in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23dfeee5' stroke='%231f6b47' stroke-width='3'/%3E%3Cpath d='M12 20.5l5 5L28 14.5' fill='none' stroke='%231f6b47' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .static-note { border: 1px dashed var(--line); border-radius: 10px; padding: 12px 16px; color: var(--ink-2); font-size: 0.9rem; background: var(--paper); }
+  .editor { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+  .editor select { max-width: 100%; min-width: 0; }
+  #edit-out ul { margin: 8px 0 0; padding-left: 18px; }
+  #replay-section[hidden] { display: none; }
+  footer.site { max-width: 1180px; margin: 0 auto; padding: 8px 16px 40px; color: var(--muted); font-size: 0.85rem; }
+  footer.site p { margin: 4px 0; max-width: 90ch; }
+  .models { display: grid; gap: 18px; }
+  .integrity { max-width: 100%; white-space: normal; }
+  code { overflow-wrap: anywhere; word-break: break-all; }
+  .editor .picker { max-width: 100%; min-width: 0; flex-wrap: wrap; }
+  .editor select { max-width: 100%; }
+  @media (max-width: 640px) { .duel { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="seal" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="20" r="13" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/><path d="M13 20.5l4.5 4.5L27 15.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>
+      <h1>ACK Guard</h1>
+      <p>A deterministic payment policy and a signed audit trail for AI agents, built on Catena Labs' open-source Agent Commerce Kit.</p>
+    </div>
+  </div>
+  <div class="integrity" id="integrity" role="status">Checking the audit log in your browser</div>
+</header>
+
+<main>
+  <p class="static-note" id="static-note">This is a static replay. The three steps were recorded when this page was built, in the project's sandbox, with a deterministic scripted agent (not an LLM). The page makes no API calls. It re-checks the audit log's hash chain and signatures here, in your browser.</p>
+
+  <section class="guided" id="guided" aria-labelledby="guided-title">
+    <div class="guided-head">
+      <div>
+        <h2 id="guided-title">See it work in three steps</h2>
+        <p class="muted">Sandbox only: fictional merchants, an in-memory ledger, no real money.</p>
+      </div>
+      <button id="guided-btn" type="button">Run the guided demo</button>
+    </div>
+    <ol class="guided-steps">
+      <li>
+        <h3>A legitimate purchase</h3>
+        <p class="what">The owner asks for tomorrow's Boston forecast. SkyCast Weather answers with a signed $0.25 ACK-Pay request.</p>
+        <p class="result" id="g1"></p>
+      </li>
+      <li>
+        <h3>An injected invoice</h3>
+        <p class="what">An email in the agent's inbox carries a $3.80 "overdue balance" payment request, signed by an attacker posing as SkyCast billing.</p>
+        <p class="result" id="g2"></p>
+      </li>
+      <li>
+        <h3>Someone rewrites the record</h3>
+        <p class="what">A copy of the signed log is edited so the blocked payment reads "allow", then verified in your browser.</p>
+        <p class="result" id="g3"></p>
+      </li>
+    </ol>
+  </section>
+
+  <section id="replay-section" hidden aria-labelledby="replay-title">
+    <div class="replay" id="replay" style="border-left: 0; max-height: none; padding: 0"></div>
+  </section>
+
+  <section aria-labelledby="edit-title">
+    <h2 id="edit-title">Try your own edit</h2>
+    <p class="muted">Pick an entry of the signed log and change it. The copy is re-verified in your browser; the original stays untouched.</p>
+    <div class="editor">
+      <label class="picker">Entry <select id="edit-entry"></select></label>
+      <label class="picker">Change <select id="edit-kind">
+        <option value="edit">Edit its content</option>
+        <option value="delete">Delete it</option>
+        <option value="swap">Swap it with the next entry</option>
+        <option value="truncate">Cut the log after it</option>
+      </select></label>
+      <button id="edit-btn" type="button">Verify the edited copy</button>
+    </div>
+    <div id="edit-out" role="status"></div>
+  </section>
+
+  <section class="score" id="results" hidden aria-labelledby="results-title">
+    <div class="score-head">
+      <div>
+        <h2 id="results-title">Recorded benchmark results</h2>
+        <p class="muted" id="results-meta"></p>
+      </div>
+    </div>
+    <div class="models" id="models"></div>
+  </section>
+</main>
+
+<footer class="site">
+  <p>Built by Ilia Duda with Claude Code. Independent project, not affiliated with, sponsored by or endorsed by Catena Labs. Built on <a href="https://github.com/agentcommercekit/ack">Agent Commerce Kit</a> (MIT, Catena Labs, Inc. and contributors).</p>
+  <p id="build-info"></p>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
