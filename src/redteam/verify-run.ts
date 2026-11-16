@@ -72,8 +72,12 @@ export async function verifyRun(runDir: string, opts: { signer?: string; expecte
   const ids = genesis ? identitiesFromGenesis(genesis.payload, await buildIdentities()) : undefined
   const ctx = ids ? makeBuildCtx(ids) : undefined
   let checked = 0
+  const seenLogEpisodes = new Set<string>()
   for (const row of rows) {
     const id = row.logEpisodeId ?? row.episodeId
+    // One row per log episode: a row cannot borrow another row's episode.
+    if (seenLogEpisodes.has(id)) problems.push(`row ${row.episodeId}: log episode ${id} is claimed by more than one row`)
+    seenLogEpisodes.add(id)
     const es = byEpisode.get(id)
     const end = es?.find((e) => e.kind === "episode_end")
     const taskEntry = es?.find((e) => e.kind === "task")
@@ -81,9 +85,17 @@ export async function verifyRun(runDir: string, opts: { signer?: string; expecte
       problems.push(`row ${row.episodeId} has no complete episode in the signed log`)
       continue
     }
-    const scenario = ALL_SCENARIOS.find((s) => s.id === row.scenarioId)
+    // The row's identity (which scenario, which agent, which run) must be the signed one.
+    const tp = taskEntry.payload
+    const signedId: Record<string, unknown> = { scenarioId: tp.scenarioId, mode: tp.mode, run: tp.run, seed: tp.seed, model: tp.model, category: tp.category }
+    for (const [k, v] of Object.entries(signedId)) {
+      const rv = (row as unknown as Record<string, unknown>)[k]
+      if (JSON.stringify(rv) !== JSON.stringify(v)) problems.push(`row ${row.episodeId}: ${k} is ${JSON.stringify(rv)} in episodes.jsonl but ${JSON.stringify(v)} in the signed log`)
+    }
+    if (!!row.error !== !!end.payload.error) problems.push(`row ${row.episodeId}: error status differs from the signed log`)
+    const scenario = ALL_SCENARIOS.find((s) => s.id === tp.scenarioId)
     if (!scenario || !ids || !ctx) {
-      problems.push(`unknown scenario ${row.scenarioId}`)
+      problems.push(`unknown scenario ${String(tp.scenarioId)}`)
       continue
     }
     const built = await scenario.build(ctx)
@@ -106,7 +118,7 @@ export async function verifyRun(runDir: string, opts: { signer?: string; expecte
     })
     const r: EpisodeResult = {
       episodeId: id,
-      mode: row.mode,
+      mode: tp.mode as EpisodeResult["mode"],
       finalText: "",
       steps: 0,
       transfers,

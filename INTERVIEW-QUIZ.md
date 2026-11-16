@@ -10,7 +10,7 @@ An AI agent with a wallet reads untrusted text all day, and any of it can say "p
 
 **2. Why not just make the model better at spotting injections?**
 
-Because the model is the component under attack, and its resistance is probabilistic. Better models help, but you cannot write a guarantee about one. The guard does not need the model to be right: it refuses payments that fail checks the model cannot influence. The two approaches are complementary. In the results, the guarded agent is still fooled into trying the attacker's payments. The guard refuses them.
+Because the model is the component under attack, and its resistance is probabilistic. Better models help, but you cannot write a guarantee about one. The guard does not need the model to be right: it refuses payments that fail checks the model cannot influence. The two approaches are complementary. In the results, the guarded agent still tries payments the guard refuses, in 80 of 175 attack runs. Most come from injected text; 20 are quotes from a merchant that was itself compromised.
 
 **3. Which ACK pieces did you use, and which did you build?**
 
@@ -99,7 +99,7 @@ The verifier checks the sequence, the chain links, every hash, every signature a
 **13. Can someone forge a log?**
 
 - Without the guard key, they can't produce valid signatures. That's why the verifier pins the expected guard DID from outside the log. A whole new log signed by a different key is reported as "not pinned", not "verified".
-- With the key, the residual risk is rollback: restoring an older log together with its older, genuine head. For that, the head hash has to be anchored outside the log, which is what `verify-log --expect-head` checks.
+- With the key, anyone can sign a whole new log, or roll back to an older log with its older, genuine head. Only a head hash anchored outside the log before the key leaked defends against that, which is what `verify-log --expect-head` checks. In this demo the key sits unencrypted in `.data/keys.json` next to the logs; in production it belongs in an HSM or KMS.
 - The log also refuses to continue after damage, so a truncation cannot be "healed" by the next append.
 
 **14. What does replay prove?**
@@ -160,7 +160,7 @@ Each would have biased the results, and each is documented.
 
 - **Re-derived from the signed log.** `pnpm report` doesn't trust the summary files. It re-derives every scored row from the audit log's signed entries: the transfers, the decisions and the merchant service records. It checks that the log's run id and final head hash match the run's metadata, and refuses to publish if anything disagrees.
 - **One code version per run.** The run records its git commit and refuses to resume on different code.
-- **Fixes were checked against recorded results.** Three independent reviews ran during the build. Each confirmed finding got a fix and a regression test. One of them was a race that could have changed results, and I replayed the affected episodes to show it did not.
+- **Fixes were checked against recorded results.** Four independent reviews ran, the last one after the final benchmark. Each confirmed finding got a fix and a regression test. The last round's fixes touch the benchmark code path only when an audit log write fails, which never happened in the recorded run (0 errors). One of them was a race that could have changed results, and I replayed the affected episodes to show it did not.
 - **The limit:** the guard DID and head hash also live in the repository, so for full assurance they need to be published somewhere else as well.
 
 **21. What would make you distrust these results?**

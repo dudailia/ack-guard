@@ -75,7 +75,7 @@ A `World` is one episode: fresh network, ledger and merchants, shared identities
   **The spend store** (`src/policy/spend-store.ts`) holds the spend history the rules read, plus a lock.
 
   - **Serialized payments.** Every payment decision for the agent goes through the lock. The AI SDK can run several tool calls from one model step concurrently, and without the lock two `pay` calls could be evaluated against the same history and both pass. An independent review found that race. A regression test fires three concurrent payments at one quote and expects one payment and two blocks, and a property test fires random batches.
-  - **Shared in the live demo.** The demo shares one store across all episodes and persists it to `.data/spend-history.json`, so the daily cap is per agent across episodes and restarts.
+  - **Shared in the live demo.** The demo shares one store across all episodes and persists it to `.data/spend-history.json`, so the daily cap is per agent across episodes and restarts. Each decision re-reads the file first, so a second demo process sharing `.data` is counted too (two processes deciding in the same instant could still race; a real deployment would use a transactional store). The file is unsigned: anyone who can edit `.data` can reset it, though the signed log still records every settlement. A payment's spend is recorded before its settlement is logged, so a failed log write cannot leave money uncounted.
   - **Fresh in the benchmark.** The benchmark gives each episode a fresh store on purpose: each episode is an independent day, otherwise earlier episodes would use up the cap for later ones. `needs_approval` goes to an approver: a dashboard button in the demo, and "deny by default" in the benchmark, reported as an escalation. If approved, the engine runs again with the approval as a fact, so an approval can never override a deny rule.
 
 ### 3.6 The policy engine (`src/policy/engine.ts`)
@@ -85,7 +85,7 @@ A pure function: `(facts, task, config, history, now) -> decision`. No I/O, no r
 Why each rule exists, and the attack it was built for:
 
 - `REQ_SIGNATURE`: you cannot pay something whose integrity you cannot check.
-- `AGENT_IDENTITY`: the guard acts for a specific owner and refuses to spend for an agent whose ControllerCredential does not chain to that owner. It is re-checked on every payment. It guards against a misconfigured, wrong or revoked credential; injected text cannot change the credential, so this rule is not what stops injection attacks.
+- `AGENT_IDENTITY`: the guard acts for a specific owner and refuses to spend for an agent whose ControllerCredential does not chain to that owner. It is re-checked on every payment. It guards against a misconfigured or wrong credential (revocation is not implemented here: the credential carries no status list or expiry, though ACK supports both); injected text cannot change the credential, so this rule is not what stops injection attacks.
 - `REQ_PROVENANCE`: the single most effective rule against fake invoices (in the recorded run it refused every fake-invoice payment the agent attempted). A legitimate purchase in ACK-Pay starts with *you* calling a service and *it* answering 402. A payment request that shows up in an email body, a web page or a JSON field is not a quote for something you asked for. The guard knows the difference because it sits in the HTTP client.
 - `MERCHANT_ALLOWLIST`: identity is the DID, not the display name. The impostor can call itself "SkyCast Weather"; it cannot sign as SkyCast. The rule also refuses a genuine SkyCast token served from someone else's host.
 - `RECIPIENT_BINDING`: a valid merchant signature does not prove the payout account is right; servers get compromised and configs get edited. The operator registers the payout account out of band.
@@ -212,7 +212,7 @@ To see tamper detection by hand: change any value inside a `payload` in a log un
 ## 4b. How the tests are built
 
 - **Unit tests** cover every policy rule (including rule order and the decimals trick), receipts and identity, each tampering type, replay, the runner and the dashboard API.
-- **Regression tests** reproduce every issue found by the two independent reviews (`test/review-regressions.test.ts`, plus the earlier ones in `receipts.test.ts` and `audit.test.ts`).
+- **Regression tests** reproduce every issue found by the independent reviews (`test/review-regressions.test.ts`, plus the earlier ones in `receipts.test.ts` and `audit.test.ts`).
 - **Property tests** (`test/properties.test.ts`, fast-check):
   - An allowed payment always satisfies an independently written list of invariants. Inputs are near-miss payments: a valid payment with random perturbations, so the property is never vacuous. Breaking `RECIPIENT_BINDING` or `TASK_BUDGET` in the engine makes it fail.
   - An approval never turns a deny into an allow.

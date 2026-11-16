@@ -72,4 +72,16 @@ describe("dashboard API", () => {
     const rebind = await app.request("http://attacker.example:4300/api/approvals")
     expect(rebind.status).toBe(403)
   })
+
+  it("an approval needs a real boolean: the string \"false\" does not approve", async () => {
+    const { log, root } = await setup()
+    const got: boolean[] = []
+    const approvals = new Map([["ap_1", { id: "ap_1", episodeId: "e", createdAt: "", decision: {} as never, task: { id: "t", prompt: "" }, resolve: (r: { approved: boolean }) => got.push(r.approved) }]])
+    const app = createDashboard({ liveLog: log, root, port: 4300, approvals })
+    const post = (body: string) => app.request(`${BASE}/api/approvals/ap_1`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body })
+    expect((await post('{"approved":"false"}')).status).toBe(400)
+    expect(got).toEqual([])
+    expect((await post('{"approved":false}')).status).toBe(200)
+    expect(got).toEqual([false])
+  })
 })

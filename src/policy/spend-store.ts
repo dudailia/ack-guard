@@ -16,15 +16,29 @@ export class SpendStore {
   private queue: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly persistPath?: string) {
-    if (persistPath && existsSync(persistPath)) {
-      const rows = JSON.parse(readFileSync(persistPath, "utf8")) as (Omit<PaidRecord, "amount"> & { amount: string })[]
-      this.history.payments.push(...rows.map((r) => ({ ...r, amount: BigInt(r.amount) })))
-    }
+    this.reload()
   }
 
-  /** Runs payment decisions one at a time, across every World sharing this store. */
+  /** Merges payments another process wrote to the shared file since we last looked. */
+  private reload() {
+    if (!this.persistPath || !existsSync(this.persistPath)) return
+    const rows = JSON.parse(readFileSync(this.persistPath, "utf8")) as (Omit<PaidRecord, "amount"> & { amount: string })[]
+    const known = new Set(this.history.payments.map((p) => p.paymentRequestId))
+    for (const r of rows) if (!known.has(r.paymentRequestId)) this.history.payments.push({ ...r, amount: BigInt(r.amount) })
+    this.history.payments.sort((x, y) => x.ts - y.ts)
+  }
+
+  /**
+   * Runs payment decisions one at a time, across every World sharing this store.
+   * With a persisted file, each decision first re-reads it, so a second demo
+   * process's payments count too. (Two processes deciding in the same instant
+   * can still race; a real deployment would keep this in a transactional store.)
+   */
   run<T>(fn: () => Promise<T>): Promise<T> {
-    const p = this.queue.then(fn)
+    const p = this.queue.then(() => {
+      this.reload()
+      return fn()
+    })
     this.queue = p.catch(() => undefined)
     return p
   }
@@ -32,6 +46,7 @@ export class SpendStore {
   record(p: PaidRecord) {
     this.history.payments.push(p)
     if (this.persistPath) {
+      this.reload()
       mkdirSync(dirname(this.persistPath), { recursive: true })
       // Keep 48h of history; older entries cannot affect any rule.
       const cutoff = Date.now() - 48 * 3600 * 1000

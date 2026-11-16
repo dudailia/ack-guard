@@ -296,7 +296,8 @@ export class World {
       this.outcomes.push({ attemptId, result, decision })
       return result
     }
-    await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
+    // Count the spend before anything else can fail: money has moved, so the
+    // budget and daily cap must see it even if the log write below throws.
     this.spend.record({
       ts: tx.ts,
       amount: tx.amount,
@@ -305,6 +306,7 @@ export class World {
       paymentRequestId: tx.paymentRequestId,
       merchantDid: facts.requestSignature.issuer!,
     })
+    await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
 
     const receiptJwt = await this.receipts.issue({
       paymentRequestToken: input.paymentRequest,

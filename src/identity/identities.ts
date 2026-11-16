@@ -21,7 +21,6 @@ import {
   curveToJwtAlgorithm,
   generateKeypair,
   generatePrivateKeyBytes,
-  getDidResolver,
   hexStringToBytes,
   signCredential,
   type DidDocument,
@@ -33,6 +32,7 @@ import {
   type KeyCurve,
   type Keypair,
 } from "agentcommercekit"
+import { offlineDidResolver } from "./offline-resolver.js"
 
 export interface Party {
   name: string
@@ -104,7 +104,7 @@ export function loadOrCreateKeyFile(path: string): KeyFile {
 }
 
 export async function buildIdentities(keyFile: KeyFile = generateKeyFile()): Promise<Identities> {
-  const resolver = getDidResolver()
+  const resolver = offlineDidResolver()
   const parties = {} as Record<PartyName, Party>
   let agentDidDocument: DidDocument | undefined
 

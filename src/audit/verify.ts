@@ -2,7 +2,8 @@
 // (pinned to the expected guard DID) and the signed head checkpoint.
 
 import { existsSync, readFileSync } from "node:fs"
-import { getDidResolver, verifyJwt, type DidResolver } from "agentcommercekit"
+import { verifyJwt, type DidResolver } from "agentcommercekit"
+import { offlineDidResolver } from "../identity/offline-resolver.js"
 import { GENESIS_PREV, entryHash, headPath, type AuditEntry } from "./chain.js"
 
 export type ProblemKind =
@@ -79,7 +80,7 @@ export async function verifyLog(
     expectedHeadHash?: string
   } = {},
 ): Promise<VerifyReport> {
-  const resolver = opts.resolver ?? getDidResolver()
+  const resolver = opts.resolver ?? offlineDidResolver()
   const problems: VerifyProblem[] = []
   const { entries } = readEntries(path)
   // The signer is pinned by the caller (operator config). If not provided we

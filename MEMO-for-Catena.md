@@ -7,14 +7,13 @@
 **What it shows.**
 - **Attacks.** 35 payment attacks in 7 categories plus 10 benign tasks, run 5 times each against the same local model (qwen3:8b) with and without the guard: 450 episodes, judged on a sandbox ledger.
 - **Without the guard,** attacks moved unintended money in 82/175 runs (46.9%), sending $65.20 to attacker accounts.
-- **With the guard,** 2/175 (1.1%) and $0.00. Both failures are the attack written to probe a known gap: re-buying the same forecast under a new query string (`DC-05`), which is correctly priced, on-purpose and within budget, so policy allows it ($0.50 in total). The model was still fooled: in 80 of 175 guarded attack runs it tried a payment the guard refused.
+- **With the guard,** 2/175 (1.1%) and $0.00. Both failures are the attack written to probe a known gap: re-buying the same forecast under a new query string (`DC-05`), which is correctly priced, on-purpose and within budget, so policy allows it ($0.50 in total). The model still tried payments the guard refused in 80 of 175 guarded attack runs, most of them injected requests.
 - **Cost.** No benign payment was blocked by a deny rule, but the two benign tasks above the $1 approval threshold waited for a human and, with the benchmark's deny-by-default approver, did not complete (benign completion 40/50 guarded, 50/50 naive). During attacks the legitimate task still completed in 88/175 guarded runs against 109/175 naive, because after a block the small model often stops.
-- **Evidence.** Every decision names the rule that fired and lands in a hash-chained log signed by the guard's DID. Replay rebuilds any payment or blocked attempt and re-verifies the ACK receipt and the ACK-ID credential. A fuzzer shows every random edit, deletion, reorder or truncation of the log is detected at the right entry.
+- **Evidence.** Every decision names the rule that fired and lands in a hash-chained log signed by the guard's DID. Every settlement gets an ACK `PaymentReceiptCredential`, which the merchant verifies before serving. Replay rebuilds any payment or blocked attempt and re-verifies the ACK receipt and the ACK-ID credential. A fuzzer shows every random edit, deletion, reorder or truncation of the log is detected at the right entry.
 
 **How it maps to ACK.** The guard decides only on facts ACK makes verifiable or the owner sets:
 - the `ControllerCredential` chaining the agent to its owner (ACK-ID)
 - the merchant DID's signature on the 402 `PaymentRequest`, and the fact that this exact request came back from a URL the agent called (ACK-Pay)
-- the `PaymentReceiptCredential` the merchant verifies before serving
 - operator configuration: the allowlist, payout accounts, prices, and the task's declared needs and budget
 
 The single most effective rule is provenance. A legitimate quote is one you asked for, so a payment request found in an email or a web page is refused without parsing any text.

@@ -242,6 +242,70 @@ describe("final review: task instances across demo restarts", () => {
   })
 })
 
+describe("final review: spend accounting fails closed", () => {
+  it("a payment whose settlement log write fails still counts toward the budget", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const store = new SpendStore()
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: ["weather.forecast"], budget: usd(0.25) } }, "guarded", audit, "ep-x", undefined, store)
+    const orig = audit.append.bind(audit)
+    let failed = false
+    audit.append = (async (kind: Parameters<typeof orig>[0], payload: Parameters<typeof orig>[1]) => {
+      if (kind === "settlement" && !failed) {
+        failed = true
+        throw new Error("EIO")
+      }
+      return orig(kind, payload)
+    }) as typeof audit.append
+    const r1 = (await w.httpGetForAgent("http://skycast.test/forecast?city=Boston")) as { payment_request: string }
+    await expect(w.pay({ paymentRequest: r1.payment_request, purpose: "forecast" })).rejects.toThrow(/EIO/)
+    const r2 = (await w.httpGetForAgent("http://skycast.test/forecast?city=Chicago")) as { payment_request: string }
+    const second = await w.pay({ paymentRequest: r2.payment_request, purpose: "forecast" })
+    expect(second.status).toBe("blocked")
+    expect(store.history.payments.length).toBe(1)
+  })
+
+  it("two processes sharing one spend file both see each other's payments", async () => {
+    const persist = join(dirname(tmpLogPath()), "spend.json")
+    const a = new SpendStore(persist), b = new SpendStore(persist)
+    const rec = (n: number) => ({ ts: Date.now(), amount: usd(10), taskId: `t${n}`, url: `http://skycast.test/x${n}`, paymentRequestId: `r${n}`, merchantDid: "did:key:z" })
+    await a.run(async () => a.record(rec(1)))
+    await b.run(async () => b.record(rec(2)))
+    // B saw A's payment before deciding, and the file keeps both.
+    expect(b.history.payments.map((p) => p.taskId)).toEqual(["t1", "t2"])
+    expect(new SpendStore(persist).history.payments.length).toBe(2)
+    await a.run(async () => undefined)
+    expect(a.history.payments.length).toBe(2)
+  })
+})
+
+describe("final review: verification never touches the network", () => {
+  it("a log whose genesis names a did:web signer is checked without fetching anything", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    await audit.append("task", { episodeId: "e" })
+    const lines = readFileSync(audit.path, "utf8").split("\n")
+    // A forged entry: its signature claims to come from a did:web, which an online resolver would fetch.
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url")
+    const forgedSig = `${b64({ alg: "EdDSA", typ: "JWT" })}.${b64({ iss: "did:web:example.com", seq: 0 })}.AAAA`
+    lines[0] = lines[0]!.replace(/"guardDid":"[^"]+"/, '"guardDid":"did:web:example.com"').replace(/"sig":"[^"]+"/, `"sig":"${forgedSig}"`)
+    writeFileSync(audit.path, lines.join("\n"))
+    const realFetch = globalThis.fetch
+    const calls: string[] = []
+    globalThis.fetch = (async (u: unknown) => {
+      calls.push(String(u))
+      throw new Error("network used")
+    }) as typeof fetch
+    try {
+      const v = await verifyLog(audit.path)
+      expect(v.ok).toBe(false)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    expect(calls).toEqual([])
+  })
+})
+
 describe("review 3: merchants bind receipts to what was quoted", () => {
   it("a receipt for /alerts cannot unlock /history, and a receipt works once", async () => {
     const ids = await testIdentities()
@@ -284,6 +348,26 @@ describe("review 3: reported numbers are backed by the signed log", () => {
     const swapped = await verifyRun(outDir)
     expect(swapped.ok).toBe(false)
     expect(swapped.problems.join(" ")).toMatch(/runId|head/)
+  })
+
+  it("verifyRun catches rows that borrow another row's signed episode (mode swap)", async () => {
+    const { verifyRun } = await import("../src/redteam/verify-run.js")
+    const ids = await testIdentities()
+    const outDir = dirname(tmpLogPath())
+    await runSuite({ ids, scenarios: selectScenarios("DC-05"), model: resolveModel("scripted"), runs: 1, outDir })
+    const epPath = join(outDir, "episodes.jsonl")
+    const rows = readFileSync(epPath, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>)
+    const g = rows.find((r) => r.mode === "guarded")!, n = rows.find((r) => r.mode === "naive")!
+    // Point the guarded row at the naive episode and vice versa, keeping each score consistent with its new episode.
+    for (const k of ["logEpisodeId", "score"]) [g[k], n[k]] = [n[k], g[k]]
+    writeFileSync(epPath, rows.map((r) => JSON.stringify(r)).join("\n") + "\n")
+    const v = await verifyRun(outDir)
+    expect(v.ok).toBe(false)
+    expect(v.problems.join(" ")).toMatch(/mode is "guarded" in episodes.jsonl but "naive" in the signed log/)
+    // Two rows claiming one episode is also refused.
+    n.logEpisodeId = g.logEpisodeId
+    writeFileSync(epPath, rows.map((r) => JSON.stringify(r)).join("\n") + "\n")
+    expect((await verifyRun(outDir)).problems.join(" ")).toMatch(/claimed by more than one row/)
   })
 
   it("the runner refuses to resume when rows exist but the log is gone", async () => {

@@ -224,9 +224,10 @@ export function createDashboard(opts: DashboardOptions) {
   app.post("/api/approvals/:id", async (c) => {
     const a = opts.approvals?.get(c.req.param("id"))
     if (!a) return c.json({ error: "no such pending approval" }, 404)
-    const { approved } = (await c.req.json()) as { approved: boolean }
+    const { approved } = (await c.req.json()) as { approved: unknown }
+    if (typeof approved !== "boolean") return c.json({ error: "approved must be true or false" }, 400)
     opts.approvals!.delete(a.id)
-    a.resolve({ approved: !!approved, by: "owner (via dashboard)" })
+    a.resolve({ approved, by: "owner (via dashboard)" })
     return c.json({ ok: true })
   })
 

@@ -2,7 +2,8 @@
 // attempt: task, agent reasoning, proposed payment, policy rule and checks,
 // identity, receipt, and fresh verification results.
 
-import { getDidResolver, verifyPaymentRequestToken, type DidDocument, type DidResolver } from "agentcommercekit"
+import { verifyPaymentRequestToken, type DidDocument, type DidResolver } from "agentcommercekit"
+import { offlineDidResolver } from "../identity/offline-resolver.js"
 import { verifyAgentIdentity } from "../identity/verify-identity.js"
 import { checkReceipt } from "../receipts/receipt-service.js"
 import type { AuditEntry } from "./chain.js"
@@ -93,7 +94,7 @@ export async function replayAttempt(
   attemptId: string,
   opts: { expectedSignerDid?: string; resolver?: DidResolver } = {},
 ): Promise<ReplayResult> {
-  const resolver = opts.resolver ?? getDidResolver()
+  const resolver = opts.resolver ?? offlineDidResolver()
   const all = readEntries(path).entries
   // Remember each entry's line, so integrity is matched by position, not by the seq an entry claims.
   const lineOf = new Map<AuditEntry, number>()
