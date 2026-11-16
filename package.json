@@ -1,0 +1,40 @@
+{
+  "name": "ack-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic payment guard, signed audit trail and red-team suite for AI agents, built on Catena Labs' open-source Agent Commerce Kit (ACK).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "demo": "tsx src/cli/demo.ts",
+    "redteam": "tsx src/cli/redteam.ts",
+    "replay": "tsx src/cli/replay.ts",
+    "verify-log": "tsx src/cli/verify-log.ts",
+    "report": "tsx scripts/gen-results-table.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "check:em-dash": "tsx scripts/check-no-em-dash.ts",
+    "check:secrets": "tsx scripts/check-secrets.ts",
+    "check": "pnpm typecheck && pnpm test && pnpm check:em-dash && pnpm check:secrets",
+    "spike": "tsx scripts/spike.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.105",
+    "@ai-sdk/openai-compatible": "^3.0.92",
+    "@hono/node-server": "^2.1.8",
+    "agentcommercekit": "0.11.0",
+    "ai": "^7.0.173",
+    "hono": "^4.13.18",
+    "valibot": "1.4.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
