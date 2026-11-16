@@ -16,6 +16,7 @@ const RULE_LABELS = {
   RECIPIENT_BINDING: "Wrong payout account",
   PRICE_BINDING: "Wrong price",
   PURPOSE_BINDING: "Not needed for this task",
+  DELEGATION_LIMITS: "Beyond the sub-agent's delegation",
   DUPLICATE_CHARGE: "Already bought",
   PER_PAYMENT_CAP: "Over the per-payment cap",
   TASK_BUDGET: "Over the task budget",
@@ -63,7 +64,7 @@ async function guided() {
   setStep(1, "running", "The agent is working on it")
   await sleep(900)
   const paidAmount = legit.settlement?.tx?.amount
-  setStep(1, "good", `Paid ${money(paidAmount)}. All 12 checks passed and the ACK receipt verified. ${replayLink("legit")}`, "done-good")
+  setStep(1, "good", `Paid ${money(paidAmount)}. Every policy check passed and the ACK receipt verified. ${replayLink("legit")}`, "done-good")
 
   setStep(2, "running", "The agent is reading its inbox")
   await sleep(1100)

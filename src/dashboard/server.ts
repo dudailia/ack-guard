@@ -2,6 +2,10 @@
 // SSE from the demo log, or any recorded run), replay view, tamper demo, and a
 // human-approval queue for live guarded runs. Binds to 127.0.0.1 only.
 
+import type { DidDocument } from "agentcommercekit"
+import { buildDisputePack } from "../dispute/pack.js"
+import { renderDisputePdf } from "../dispute/pdf.js"
+import type { Party } from "../identity/identities.js"
 import type { ActivePolicy } from "../policy/approvals.js"
 import { policyDiff, type PolicyDiffReport } from "../policy/diff.js"
 import { parsePolicy, type LoadedPolicy } from "../policy/policy-file.js"
@@ -46,6 +50,8 @@ export interface DashboardOptions {
   root?: string
   /** This machine's guard DID. Logs it signed are verified as pinned; other logs as "not pinned". */
   operatorGuardDid?: string
+  /** Dispute evidence packs, signed by this machine's guard key. */
+  dispute?: { guard: Party; didDocuments: Record<string, DidDocument> }
   /** Policy page: the active policy, its history, and approving a diffed change. */
   policy?: {
     active: () => ActivePolicy
@@ -92,6 +98,23 @@ export function createDashboard(opts: DashboardOptions) {
   }
   app.get("/", (c) => c.html(readFileSync(join(PUBLIC, "index.html"), "utf8")))
   app.get("/policy", (c) => c.html(readFileSync(join(PUBLIC, "policy.html"), "utf8")))
+
+  // ---------- dispute packs ----------
+  app.get("/api/dispute", async (c) => {
+    if (!opts.dispute) return c.json({ error: "dispute packs are not configured" }, 404)
+    const log = allowedLog(c.req.query("log"))
+    const id = c.req.query("id")
+    if (!log || !id) return c.json({ error: "unknown log or attempt" }, 404)
+    try {
+      const pack = await buildDisputePack(log, id, { guard: opts.dispute.guard, didDocuments: opts.dispute.didDocuments, logLabel: rel(log) })
+      const name = `dispute-${id.replace(/[^A-Za-z0-9._-]+/g, "_")}`
+      if (c.req.query("format") === "pdf")
+        return c.body(Buffer.from(await renderDisputePdf(pack)), 200, { "content-type": "application/pdf", "content-disposition": `attachment; filename="${name}.pdf"` })
+      return c.body(JSON.stringify(pack, null, 2), 200, { "content-type": "application/json", "content-disposition": `attachment; filename="${name}.json"` })
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+  })
 
   // ---------- policy ----------
   const proposals = new Map<string, { proposed: LoadedPolicy; diff: PolicyDiffReport }>()

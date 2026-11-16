@@ -9,6 +9,7 @@
 // deterministic scripted stand-in (clearly labelled, never reported as an LLM).
 
 import { join } from "node:path"
+import type { DidDocument } from "agentcommercekit"
 import { AuditLog } from "../audit/chain.js"
 import { writeGenesis } from "../audit/genesis.js"
 import { ollamaAvailable, prepareModel, resolveModel, type ResolvedModel } from "../agent/model.js"
@@ -18,7 +19,7 @@ import { approvePolicyChange, loadActivePolicy, policyHistory, type ActivePolicy
 import { configFor } from "../policy/config.js"
 import { SpendStore } from "../policy/spend-store.js"
 import { approvalDemo } from "../redteam/demo-scenarios.js"
-import { ALL_SCENARIOS } from "../redteam/index.js"
+import { ALL_SCENARIOS, DELEGATION_SCENARIOS } from "../redteam/index.js"
 import { makeBuildCtx } from "../redteam/types.js"
 import { taskInstanceId, type Approver, type Mode } from "../world.js"
 import { loadEnv, localIdentities } from "./env.js"
@@ -52,7 +53,7 @@ try {
 let policy = configFor(ids, active.policy)
 await writeGenesis(audit, ids, policy, { model: model.id, purpose: "live demo log", policyVersion: active.policy.version, policySource: active.source })
 
-const scenarios = [...ALL_SCENARIOS, approvalDemo]
+const scenarios = [...ALL_SCENARIOS, ...DELEGATION_SCENARIOS, approvalDemo]
 // One spend history for the agent across every live episode and restart, so the
 // rolling daily cap is real. Delete .data/spend-history.json to reset it.
 const spend = new SpendStore(join(process.cwd(), ".data", "spend-history.json"))
@@ -115,6 +116,15 @@ async function run(scenarioId: string, mode: Mode) {
   return { episodeId, done }
 }
 
+async function didDocsFor(i: typeof ids) {
+  const docs: Record<string, DidDocument> = {}
+  for (const p of [i.parties.agent, i.parties.subagent]) {
+    const r = await i.resolver.resolve(p.did)
+    if (r.didDocument) docs[p.did] = r.didDocument as DidDocument
+  }
+  return docs
+}
+
 const { url } = startDashboard({
   port,
   liveLog: audit,
@@ -123,6 +133,7 @@ const { url } = startDashboard({
   liveInfo: () => ({ model: model.label }),
   operatorGuardDid: ids.parties.guard.did,
   runScenario: (scenarioId, mode) => run(scenarioId, mode),
+  dispute: { guard: ids.parties.guard, didDocuments: await didDocsFor(ids) },
   policy: {
     active: () => active,
     history: () => policyHistory(),

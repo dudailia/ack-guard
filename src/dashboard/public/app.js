@@ -24,6 +24,7 @@ const RULE_LABELS = {
   RECIPIENT_BINDING: "Wrong payout account",
   PRICE_BINDING: "Wrong price",
   PURPOSE_BINDING: "Not needed for this task",
+  DELEGATION_LIMITS: "Beyond the sub-agent's delegation",
   DUPLICATE_CHARGE: "Already bought",
   PER_PAYMENT_CAP: "Over the per-payment cap",
   TASK_BUDGET: "Over the task budget",
@@ -33,6 +34,7 @@ const RULE_LABELS = {
   NO_GUARD: "No guard, no checks",
 }
 const ruleLabel = (id) => RULE_LABELS[id] || id
+const shortName = (did) => (!did ? "?" : did.startsWith("did:web:") ? did.split(":").slice(-1)[0] : `${did.slice(0, 18)}...`)
 const scenarioTitle = (id) => state.catalog.scenarios[id]?.title
 const runLabel = (r) =>
   r.meta?.combined
@@ -248,7 +250,19 @@ async function replay(id) {
       <li><div><h3>Task, as set by the owner</h3><p class="quote">${esc(task.prompt)}</p>
         <dl class="kv"><dt>Declared needs</dt><dd>${esc((task.needs || []).join(", ") || "none")}</dd><dt>Budget</dt><dd>${money(task.budget)}</dd></dl></div></li>
       <li><div><h3>Identity (ACK-ID)</h3><dl class="kv"><dt>Agent</dt><dd>${esc(r.identity.agentDid)}</dd><dt>Owner</dt><dd>${esc(r.identity.ownerDid)}</dd>
-        <dt>ControllerCredential</dt><dd>${yes(r.identity.controllerCredentialValid)}</dd></dl></div></li>
+        <dt>ControllerCredential</dt><dd>${yes(r.identity.controllerCredentialValid)}</dd></dl>${
+          r.identity.delegation
+            ? `<p class="muted">Paid by a sub-agent through a delegation chain, verified link by link:</p><ul class="checks">${r.identity.delegation.links
+                .map(
+                  (l) =>
+                    `<li><span class="mark ${l.ok ? "pass" : "fail"}">${l.ok ? "pass" : "FAIL"}</span><span>link ${l.index}</span><span class="detail muted">${esc(shortName(l.issuer))} to ${esc(shortName(l.subject))}${
+                      l.scope ? `: up to ${money(l.scope.budget)}, may buy ${esc(l.scope.capabilities.join(", "))}` : ""
+                    }${l.error ? `. ${esc(l.error)}` : ""}</span></li>`,
+                )
+                .join("")}</ul>`
+            : ""
+        }
+        ${r.mode === "guarded" ? `<p><a href="/api/dispute?log=${encodeURIComponent(state.log)}&id=${encodeURIComponent(r.attemptId)}&format=pdf" download>Download the dispute evidence pack (PDF)</a> or <a href="/api/dispute?log=${encodeURIComponent(state.log)}&id=${encodeURIComponent(r.attemptId)}&format=json" download>signed JSON</a></p>` : ""}</div></li>
       <li><div><h3>What the agent did first</h3>${reasoning}</div></li>
       <li><div><h3>The payment it asked for</h3><dl class="kv"><dt>Agent's stated purpose</dt><dd>${esc(r.proposed.agentPurpose)}</dd>
         <dt>Signed by</dt><dd>${esc(req.issuer || req.error)}</dd><dt>Description</dt><dd>${esc(req.description)}</dd><dt>Options</dt><dd>${options}</dd></dl></div></li>
@@ -318,7 +332,7 @@ async function guidedDemo() {
     setStep(1, "running", "The agent is working on it", null)
     const a = await runAndWait("B-01")
     const paid = a.attempts.find((x) => x.status === "paid")
-    if (paid) setStep(1, "good", `Paid ${esc(paid.amount)}. All 12 checks passed and the ACK receipt verified. ${replayLink(paid.attemptId, "Open the replay")}`, "done-good")
+    if (paid) setStep(1, "good", `Paid ${esc(paid.amount)}. Every policy check passed and the ACK receipt verified. ${replayLink(paid.attemptId, "Open the replay")}`, "done-good")
     else setStep(1, "warn", `The agent did not complete the purchase this time${a.error ? ` (${esc(a.error)})` : ""}.`, null)
 
     setStep(2, "running", "The agent is reading its inbox", null)

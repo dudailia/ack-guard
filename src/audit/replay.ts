@@ -33,6 +33,8 @@ export interface ReplayResult {
     ownerDid?: string
     controllerCredentialValid: boolean
     detail?: string
+    /** Delegation scenarios: the chain the payment was made under, as the guard verified it. */
+    delegation?: { payer?: string; links: { index: number; issuer?: string; subject?: string; scope?: { budget: string; capabilities: string[] }; expiresAt?: string; ok: boolean; error?: string }[] }
   }
   reasoning: { seq: number; text?: string; toolCalls?: unknown[] }[]
   proposed: {
@@ -180,6 +182,7 @@ export async function replayAttempt(
       ownerDid: g.ownerDid,
       controllerCredentialValid: identity.ok,
       detail: identity.ok ? `controller ${identity.controller}` : identity.error,
+      delegation: (decisions[0] ? (related.find((e) => e.kind === "decision")?.payload.facts as { identity?: { chain?: ReplayResult["identity"]["delegation"] } } | undefined)?.identity?.chain : undefined) ?? undefined,
     },
     reasoning,
     proposed: {
