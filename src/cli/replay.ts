@@ -31,7 +31,7 @@ if (!id) {
     console.log(`   agent ${r.identity.agentDid}`)
     console.log(`   owner ${r.identity.ownerDid}`)
     console.log(`   ControllerCredential re-verified: ${ok(r.identity.controllerCredentialValid)} ${c.dim(r.identity.detail ?? "")}`)
-    console.log(c.bold("\n3. Agent reasoning leading to the payment"))
+    console.log(c.bold("\n3. What the agent said and did before the payment"))
     for (const s of r.reasoning) {
       if (s.text) console.log(`   [${s.seq}] ${c.cyan(s.text.slice(0, 400))}`)
       for (const tc of (s.toolCalls ?? []) as { toolName: string; input: unknown }[])
