@@ -117,6 +117,40 @@ describe("DELEGATION_LIMITS", () => {
     expect(third.status === "blocked" && third.reason).toMatch(/link 0 budget \$0\.60: \$0\.50 already spent under it/)
   })
 
+  it("a re-encoded twin of the child's own link (ECDSA high-s) shares the link's budget (review finding)", async () => {
+    const audit = await tmpAudit(ids)
+    const store = new SpendStore()
+    const l0 = await issueDelegation({ parent: ids.parties.owner, childDid: ids.parties.agent.did, scope: scope(1000, ["weather.forecast"]) })
+    const l1 = await issueDelegation({ parent: ids.parties.agent, childDid: sub.did, scope: scope(50, ["weather.forecast"]) })
+    const [h, p, sg] = l1.split(".") as [string, string, string]
+    const sig = Buffer.from(sg, "base64url")
+    const n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+    const s2 = (n - BigInt("0x" + sig.subarray(32, 64).toString("hex"))).toString(16).padStart(64, "0")
+    const twin = `${h}.${p}.${Buffer.concat([sig.subarray(0, 32), Buffer.from(s2, "hex")]).toString("base64url")}`
+    expect(twin).not.toBe(l1)
+    const w = worldFor("subagent", [l0, l1], store, audit, "ep")
+    expect((await buy(w, "A")).status).toBe("paid")
+    expect((await buy(w, "B")).status).toBe("paid")
+    const r = (await w.httpGetForAgent("http://skycast.test/forecast?city=C")) as { payment_request: string }
+    const viaTwin = await w.pay({ paymentRequest: r.payment_request, purpose: "forecast", credential: twin })
+    expect(viaTwin.status === "blocked" && viaTwin.rule).toBe("DELEGATION_LIMITS")
+    expect(w.ledger.transfers.reduce((a, t) => a + t.amount, 0n)).toBe(50n)
+  })
+
+  it("spend under a link survives a restart of the persisted store after 48 hours (review finding)", async () => {
+    const { mkdtempSync } = await import("node:fs")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const path = join(mkdtempSync(join(tmpdir(), "ack-guard-links-")), "spend.json")
+    const a = new SpendStore(path)
+    const old = Date.now() - 72 * H
+    a.record({ ts: old, amount: 50n, taskId: "t", paymentRequestId: "r-link", merchantDid: "did:key:z", links: ["link:abc"] })
+    a.record({ ts: old, amount: 25n, taskId: "t", paymentRequestId: "r-plain", merchantDid: "did:key:z" })
+    a.record({ ts: Date.now(), amount: 1n, taskId: "t", paymentRequestId: "r-now", merchantDid: "did:key:z" })
+    const b = new SpendStore(path)
+    expect(b.history.payments.map((p) => p.paymentRequestId).sort()).toEqual(["r-link", "r-now"])
+  })
+
   it("under concurrency, parent and child together never exceed the parent's link", async () => {
     await fc.assert(
       fc.asyncProperty(

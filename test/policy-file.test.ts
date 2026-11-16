@@ -46,6 +46,9 @@ describe("policy.yaml", () => {
     expect(() => parsePolicy(t.replace("  - id: TASK_BUDGET", "  - id: DAILY_CAP_X"))).toThrow(/rules must list exactly/)
     expect(() => parsePolicy(t.replace("plain: The bill must carry", "enabled: false\n    plain: The bill must carry"))).toThrow(/REQ_SIGNATURE cannot be switched off/)
     expect(() => parsePolicy(t.replace('price: "0.25"', 'price: "-1"'))).toThrow(/price/)
+    // A second entry for the same path (review finding: the engine read the first, the diff the last).
+    const dup = t.replace("      - { path: /history,", '      - { path: /history, capability: weather.forecast, price: "1.50", description: x }\n      - { path: /history,')
+    expect(() => parsePolicy(dup)).toThrow(/lists \/history more than once/)
   })
 
   it("a switched-off rule is recorded but cannot decide; escalate sends a failure to a human", async () => {

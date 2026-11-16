@@ -48,9 +48,11 @@ export class SpendStore {
     if (this.persistPath) {
       this.reload()
       mkdirSync(dirname(this.persistPath), { recursive: true })
-      // Keep 48h of history; older entries cannot affect any rule.
+      // Keep 48h of history for the daily cap and duplicates. Payments made under
+      // a delegation link are kept for good: a link's budget is a total over its
+      // whole life, so its spend must never age out.
       const cutoff = Date.now() - 48 * 3600 * 1000
-      const keep = this.history.payments.filter((x) => x.ts >= cutoff)
+      const keep = this.history.payments.filter((x) => x.ts >= cutoff || (x.links?.length ?? 0) > 0)
       writeFileSync(this.persistPath, JSON.stringify(keep.map((x) => ({ ...x, amount: x.amount.toString() })), null, 1))
     }
   }

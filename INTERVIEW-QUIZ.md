@@ -187,7 +187,10 @@ It verifies a signed audit log against the pinned guard key first. Then, for eve
 
 **24. What stops someone from editing the active policy on disk?**
 
-The live guard loads a changed policy only if the signed policy log verifies, its last `policy_change` entry is exactly the active file's hash, and that entry carries a JWT signed by the configured owner over the old hash, the new hash and a digest of the diff that was shown. Editing the file, editing the log, or an approval signed by anyone else is refused, and the demo will not start. The honest caveat: in this demo the owner's key is on the same machine as the guard's. In production the owner signs on their own device and the guard only verifies.
+The live guard loads a changed policy only if the signed policy log verifies, its last `policy_change` entry is exactly the active file's hash, and that entry carries a JWT signed by the configured owner over the old hash, the new hash and a digest of the diff that was shown. Editing the file, editing the log, a fork in the log, or an approval signed by anyone else is refused, and the demo will not start. Three honest caveats:
+- Without any approved change the guard runs the repository's `policy.yaml`, reviewed in version control but not owner-signed.
+- Deleting or rolling back the policy log falls back to an older policy silently. Like the audit log, its head needs an external anchor.
+- In this demo the owner's key is on the same machine as the guard's. In production the owner signs on their own device and the guard only verifies.
 
 **25. How is a delegation link represented, and why not invent a new credential?**
 

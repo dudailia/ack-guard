@@ -76,6 +76,22 @@ describe("policy diff", () => {
   })
 })
 
+describe("policy diff on delegation decisions (review finding)", () => {
+  it("replays spend under each delegation link, so budget refusals reproduce and a switched-off rule shows its effect", async () => {
+    const out = dirname(tmpLogPath())
+    await runSuite({ ids, scenarios: selectScenarios("DL-03,DL-05", "delegation"), model: resolveModel("scripted"), runs: 1, outDir: out, modes: ["guarded"] })
+    const dlog = join(out, "audit.jsonl")
+    const same = await policyDiff(dlog, current, current, { expectedSignerDid: ids.parties.guard.did })
+    expect(same.notReproduced).toEqual([])
+    expect(same.changes).toEqual([])
+    const off = variant((t) => t.replace("  - id: DELEGATION_LIMITS\n", "  - id: DELEGATION_LIMITS\n    enabled: false\n"))
+    const d = await policyDiff(dlog, current, off, { expectedSignerDid: ids.parties.guard.did })
+    expect(d.policyChanges).toContain("Rule DELEGATION_LIMITS switched off")
+    expect(d.counts["now allowed"]).toBeGreaterThanOrEqual(3)
+    expect(d.changes.every((c) => c.current.rule === "DELEGATION_LIMITS")).toBe(true)
+  }, 60_000)
+})
+
 describe("policy approvals", () => {
   it("an approved change is owner-signed, logged, and becomes the active policy; nothing else can", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ack-guard-policy-"))
@@ -99,6 +115,20 @@ describe("policy approvals", () => {
     await expect(loadActivePolicy(ids, dir)).rejects.toThrow(/does not verify/)
     writeFileSync(lp, orig)
     expect((await loadActivePolicy(ids, dir)).source).toBe("approved")
+  })
+
+  it("a change must build on the active policy; a fork in the policy log is refused (review finding)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ack-guard-policy-"))
+    const p = variant((t) => t.replace('daily_cap: "20.00"', 'daily_cap: "15.00"'))
+    const q = variant((t) => t.replace('daily_cap: "20.00"', 'daily_cap: "10.00"'))
+    await approvePolicyChange({ ids, current, proposed: p, diff: await policyDiff(log, current, p, { expectedSignerDid: ids.parties.guard.did }), dir })
+    // q diffed against the repository policy, not against the now-active p:
+    const stale = await policyDiff(log, current, q, { expectedSignerDid: ids.parties.guard.did })
+    await expect(approvePolicyChange({ ids, current, proposed: q, diff: stale, dir })).rejects.toThrow(/no longer the approved one/)
+    // Built on p, it is accepted.
+    const fresh = await policyDiff(log, p, q, { expectedSignerDid: ids.parties.guard.did })
+    await approvePolicyChange({ ids, current: p, proposed: q, diff: fresh, dir })
+    expect((await loadActivePolicy(ids, dir)).policy.hash).toBe(q.hash)
   })
 
   it("an approval must match the diff that was shown, and must come from the owner", async () => {

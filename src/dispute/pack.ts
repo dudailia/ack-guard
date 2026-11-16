@@ -9,7 +9,9 @@
 // it from the pack alone:
 //   - the pack signature (guard DID) and its content hash
 //   - every included log entry's hash and signature, and the signed head
-//   - that every summary field in the pack matches the signed entries
+//   - that the pack's summary (outcome, rule, rule results, policy version,
+//     amount, merchant, endpoint, payer, time, task, chain, transaction,
+//     receipt, delegation links) matches the signed entries
 //   - the ACK payment request, the ACK receipt, and the ACK-ID delegation
 //     chain as of the payment time (links may have expired since)
 // It proves what the guard recorded and signed. It does not prove the log has
@@ -71,11 +73,23 @@ export interface DisputePack {
 
 const hashOf = (p: DisputePack) => createHash("sha256").update(canonicalJson({ ...p, packHash: undefined, packSignature: undefined })).digest("hex")
 
+/**
+ * Resolver for the ACK artifacts (payment request, receipt, delegation chain).
+ * did:key always resolves from the key itself; a pack can only supply did:web
+ * documents (which would otherwise be fetched over HTTPS), and never one that
+ * replaces the agent's document recorded in the guard-signed genesis entry.
+ * Signatures on the pack, its entries and its head are checked with a plain
+ * resolver that takes nothing from the pack (see verifyDisputePack).
+ */
 function resolverFor(genesis: AuditEntry, docs: Record<string, DidDocument>) {
   const r = offlineDidResolver()
   const g = genesis.payload as { agentDid?: string; agentDidDocument?: DidDocument }
   if (g.agentDid && g.agentDidDocument) r.addToCache(g.agentDid as DidUri, g.agentDidDocument)
-  for (const [did, doc] of Object.entries(docs)) r.addToCache(did as DidUri, doc)
+  for (const [did, doc] of Object.entries(docs)) {
+    if (!did.startsWith("did:web:") || did === g.agentDid) continue
+    if ((doc as { id?: string }).id !== did) continue
+    r.addToCache(did as DidUri, doc)
+  }
   return r
 }
 
@@ -165,6 +179,9 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
   const ev = pack.evidence
   const byKind = (k: string) => ev.entries.filter((e) => e.kind === k)
   const genesis = ev.entries.find((e) => e.seq === 0 && e.kind === "genesis")
+  // Guard signatures: did:key, resolved from the key alone. Nothing in the pack can change it.
+  const sigResolver = offlineDidResolver()
+  if (!signer.startsWith("did:key:")) put("signer", false, `the guard key must be a did:key, got ${signer}`)
   const resolver = genesis ? resolverFor(genesis, ev.didDocuments ?? {}) : offlineDidResolver()
 
   // 1. The pack itself.
@@ -172,7 +189,7 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
     const h = hashOf(pack)
     let sigOk = false
     try {
-      const jv = await verifyJwt(pack.packSignature ?? "", { resolver, issuer: signer, policies: { aud: false } })
+      const jv = await verifyJwt(pack.packSignature ?? "", { resolver: sigResolver, issuer: signer, policies: { aud: false } })
       sigOk = (jv.payload as { packHash?: string }).packHash === h
     } catch {
       sigOk = false
@@ -186,7 +203,7 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
     if (entryHash(e) !== e.hash) bad.push(`entry ${e.seq}: content does not match its hash`)
     if (e.seq === 0 && e.prevHash !== GENESIS_PREV) bad.push("entry 0: not a genesis entry")
     try {
-      const jv = await verifyJwt(e.sig, { resolver, issuer: signer, policies: { aud: false } })
+      const jv = await verifyJwt(e.sig, { resolver: sigResolver, issuer: signer, policies: { aud: false } })
       const p = jv.payload as { seq?: number; hash?: string }
       if (p.seq !== e.seq || p.hash !== e.hash) bad.push(`entry ${e.seq}: signature covers a different entry`)
     } catch {
@@ -200,7 +217,7 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
   put("logEntries", !bad.length, bad.length ? bad.slice(0, 3).join("; ") : `${ev.entries.length} signed log entries verify (hash and guard signature each)`)
   let headOk = false
   try {
-    const hv = await verifyJwt(ev.head.sig, { resolver, issuer: signer, policies: { aud: false } })
+    const hv = await verifyJwt(ev.head.sig, { resolver: sigResolver, issuer: signer, policies: { aud: false } })
     const hp = hv.payload as { seq?: number; hash?: string; head?: boolean }
     headOk = hp.head === true && hp.seq === ev.head.seq && hp.hash === ev.head.hash && ev.entries.every((e) => e.seq <= ev.head.seq)
   } catch {
@@ -221,13 +238,39 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
   if (attempt && attempt.payload.paymentRequestToken !== pack.paymentRequest.token) mism.push("payment request differs from the signed attempt")
   if (attempt && JSON.stringify((attempt.payload.delegationChain as string[] | undefined) ?? [g.controllerCredential]) !== JSON.stringify(pack.delegation.chain)) mism.push("delegation chain differs from the signed attempt")
   if (task && canonicalJson(task.payload) !== canonicalJson(pack.task)) mism.push("task differs from the signed task entry")
-  const rec = last?.payload.decision as { outcome?: string; rule?: { id?: string } } | undefined
+  const rec = last?.payload.decision as { outcome?: string; rule?: { id?: string; detail?: string }; checks?: unknown[]; merchant?: string; endpoint?: string } | undefined
+  // Fields the chain re-check and the PDF depend on come from the signed entries, never from the pack's summary.
+  const signedPayer = (attempt?.payload.payer as string | undefined) ?? g.agentDid
+  const signedAt = attempt?.ts
+  if (signedPayer !== pack.subject.payer) mism.push("payer differs from the signed attempt")
+  if (signedAt !== pack.subject.attemptedAt) mism.push("attempt time differs from the signed attempt")
+  if (rec?.rule?.detail !== pack.subject.decidingDetail) mism.push("rule detail differs from the signed decision")
+  if (canonicalJson(rec?.checks ?? []) !== canonicalJson(pack.policy.checks)) mism.push("rule results differ from the signed decision")
+  if (rec?.merchant !== pack.subject.merchant) mism.push("merchant differs from the signed decision")
+  const signedEndpoint = rec?.endpoint ?? (last?.payload.facts as { provenance?: { path?: string } } | undefined)?.provenance?.path
+  if (signedEndpoint !== pack.subject.endpoint) mism.push("endpoint differs from the signed decision")
+  const signedVersion = (last?.payload.policyVersion as string | undefined) ?? (genesis?.payload.policyVersion as string | undefined)
+  if (signedVersion !== pack.policy.version) mism.push("policy version differs from the signed log")
+  // The amount comes from the signed payment request option the attempt named.
+  try {
+    const { paymentRequest } = await verifyPaymentRequestToken(pack.paymentRequest.token as JwtString, { resolver, verifyExpiry: false })
+    const optId = attempt?.payload.paymentOptionId as string | null | undefined
+    const o = paymentRequest.paymentOptions.find((x) => x.id === optId) ?? paymentRequest.paymentOptions[0]
+    const amount = o ? formatAmount(BigInt(o.amount), o.decimals, o.currency) : undefined
+    if (amount !== pack.subject.amount) mism.push(`amount ${pack.subject.amount} differs from the signed payment request (${amount})`)
+  } catch {
+    /* reported by the paymentRequest check below */
+  }
   const outcome = st ? "paid" : byKind("payment_error").some((e) => e.payload.attemptId === pack.subject.attemptId) ? "failed" : rec?.outcome
   if (outcome !== pack.subject.outcome) mism.push(`outcome ${pack.subject.outcome} differs from the signed log (${outcome})`)
   if (rec?.rule?.id !== pack.subject.decidingRule) mism.push("deciding rule differs from the signed decision")
   if ((st?.payload.tx as { txId?: string } | undefined)?.txId !== pack.subject.txId) mism.push("transaction differs from the signed settlement")
   if ((rc?.payload.receipt as string | undefined) !== pack.receipt?.jwt) mism.push("receipt differs from the signed receipt entry")
-  put("matchesLog", !mism.length, mism.length ? mism.join("; ") : "outcome, rule, task, chain, transaction and receipt match the signed entries")
+  put(
+    "matchesLog",
+    !mism.length,
+    mism.length ? mism.join("; ") : "outcome, rule and its detail, every rule result, policy version, amount, merchant, payer, time, task, chain, transaction and receipt match the signed entries",
+  )
 
   // 4. The ACK artifacts, re-verified.
   try {
@@ -241,17 +284,23 @@ export async function verifyDisputePack(pack: DisputePack, opts: { signer?: stri
     const v = await checkReceipt(pack.receipt.jwt, { resolver, trustedReceiptIssuers: [issuer], paymentRequestIssuer: pack.paymentRequest.issuer })
     put("receipt", v.ok && v.txId === pack.subject.txId, v.ok ? `ACK PaymentReceiptCredential from ${issuer} verifies, for transaction ${v.txId}` : `receipt does not verify: ${v.error}`)
   } else put("receipt", pack.subject.outcome !== "paid", pack.subject.outcome === "paid" ? "a paid attempt without a receipt" : "no money moved, so no receipt")
+  // Re-verified from the signed chain, payer and time. A blocked attempt can rest on an
+  // invalid chain (a forged link was refused); the check is that the pack reports the
+  // chain exactly as it verifies, link by link.
   const dv = await verifyDelegationChainAt(pack.delegation.chain, {
     resolver,
     ownerDid: g.ownerDid ?? "",
     rootAgentDid: g.agentDid ?? "",
-    payerDid: pack.subject.payer,
-    at: new Date(pack.subject.attemptedAt),
+    payerDid: signedPayer ?? "",
+    at: new Date(signedAt ?? 0),
   })
+  const linkView = (ls: { index: number; issuer?: string; subject?: string; scope?: unknown; ok: boolean }[]) =>
+    canonicalJson(ls.map((l) => ({ index: l.index, issuer: l.issuer, subject: l.subject, scope: l.scope, ok: l.ok })))
+  const sameReport = dv.ok === pack.delegation.ok && linkView(dv.links) === linkView(pack.delegation.links)
   put(
     "delegationChain",
-    dv.ok === pack.delegation.ok,
-    `${dv.ok ? "valid" : `invalid (${dv.error})`} at the payment time, ${pack.delegation.chain.length} link(s) from the owner to ${pack.subject.payer}${dv.ok === pack.delegation.ok ? "" : "; the pack claims otherwise"}`,
+    sameReport,
+    `${dv.ok ? "valid" : `invalid (${dv.error})`} at the payment time, ${pack.delegation.chain.length} link(s) from the owner to ${signedPayer}${sameReport ? ", as the pack reports" : "; the pack reports it differently"}`,
   )
   const pinned = !!opts.signer
   const ok = Object.values(checks).every((c) => c.ok)

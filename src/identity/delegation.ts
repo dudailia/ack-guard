@@ -56,7 +56,13 @@ export interface ChainVerification {
   payerDid?: string
 }
 
-export const linkId = (jwt: string) => `link:${createHash("sha256").update(jwt).digest("hex").slice(0, 16)}`
+/**
+ * A link's identity is what its issuer signed (JWT header and payload), not
+ * the encoded signature: ECDSA signatures are malleable (a "high-s" twin of a
+ * valid signature also verifies), so hashing the whole JWT would let anyone who
+ * has seen a link mint a twin with a fresh budget.
+ */
+export const linkId = (jwt: string) => `link:${createHash("sha256").update(jwt.split(".").slice(0, 2).join(".")).digest("hex").slice(0, 24)}`
 
 /** A parent delegates to a child: a signed ControllerCredential carrying the scope. */
 export async function issueDelegation(opts: {

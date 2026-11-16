@@ -83,7 +83,11 @@ function validate(doc: PolicyDocument) {
     keys.add(m.key)
     if (!Array.isArray(m.hosts) || !m.hosts.length) fail(`merchant ${m.key} needs hosts`)
     if (!Array.isArray(m.sells)) fail(`merchant ${m.key} needs a sells list`)
+    // One entry per path: the engine and the diff must never read different entries.
+    const paths = new Set<string>()
     for (const e of m.sells) {
+      if (paths.has(e.path)) fail(`merchant ${m.key} lists ${e.path} more than once`)
+      paths.add(e.path)
       if (!e.path?.startsWith("/") || !e.capability) fail(`merchant ${m.key} has an endpoint without a path or capability`)
       if (typeof e.price !== "string" || !/^\d+(\.\d{1,2})?$/.test(e.price)) fail(`price of ${m.key} ${e.path} must be an amount like "0.25"`)
     }

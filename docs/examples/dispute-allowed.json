@@ -1,6 +1,6 @@
 {
   "format": "ack-guard-dispute-pack/1",
-  "generatedAt": "2026-11-16T15:40:18.799Z",
+  "generatedAt": "2026-11-16T15:59:19.639Z",
   "signedBy": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
   "subject": {
     "attemptId": "DL-03/guarded/r2#1",
@@ -47,7 +47,7 @@
     "links": [
       {
         "index": 0,
-        "id": "link:e502d5ae9d6ab172",
+        "id": "link:ae21cf7aa53db8c2ed61163f",
         "ok": true,
         "issuer": "did:key:zQ3shmtwByB3j5WoxT1EvmY9ZsL2cUTVUU4x5TuNuGSoDgTxc",
         "subject": "did:web:agents.ack-guard.example:research-agent",
@@ -64,7 +64,7 @@
       },
       {
         "index": 1,
-        "id": "link:7ff760f9c0335631",
+        "id": "link:462dc0529059d3c2588267b9",
         "ok": true,
         "issuer": "did:web:agents.ack-guard.example:research-agent",
         "subject": "did:web:agents.ack-guard.example:research-agent:sub:forecaster",
@@ -816,7 +816,7 @@
     },
     "matchesLog": {
       "ok": true,
-      "detail": "outcome, rule, task, chain, transaction and receipt match the signed entries"
+      "detail": "outcome, rule and its detail, every rule result, policy version, amount, merchant, payer, time, task, chain, transaction and receipt match the signed entries"
     },
     "paymentRequest": {
       "ok": true,
@@ -828,10 +828,10 @@
     },
     "delegationChain": {
       "ok": true,
-      "detail": "valid at the payment time, 2 link(s) from the owner to did:web:agents.ack-guard.example:research-agent:sub:forecaster"
+      "detail": "valid at the payment time, 2 link(s) from the owner to did:web:agents.ack-guard.example:research-agent:sub:forecaster, as the pack reports"
     }
   },
   "verifyCommand": "pnpm dispute-verify <this file> --signer did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
-  "packHash": "0dc2527704b780c22210488136c1b4649a0d1b54092c98f0b7a88b9f9c7269c8",
-  "packSignature": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ4NDM2MTgsImZvcm1hdCI6ImFjay1ndWFyZC1kaXNwdXRlLXBhY2svMSIsInBhY2tIYXNoIjoiMGRjMjUyNzcwNGI3ODBjMjIyMTA0ODgxMzZjMWI0NjQ5YTBkMWI1NDA5MmM5OGYwYjdhODhiOWY5YzcyNjljOCIsImlzcyI6ImRpZDprZXk6ejZNa21VTFRyYWJYTFY3cGNNWUhDcXhmM1pWd0F1UFJaVXJHUkZ4VlYzb1dvYWZwIn0.-K8jI3dUvPItan8P5c6kkIDIlzGccMEn9RASAb9B0ndCwI0Qu3dk7tau81ACF-P3Gcf4edbHxQ-JIzICqVbbBg"
+  "packHash": "b83dbd34b26624148a1d1604810dde219a4e90ed4a26022c323ab32865a74f39",
+  "packSignature": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ4NDQ3NTksImZvcm1hdCI6ImFjay1ndWFyZC1kaXNwdXRlLXBhY2svMSIsInBhY2tIYXNoIjoiYjgzZGJkMzRiMjY2MjQxNDhhMWQxNjA0ODEwZGRlMjE5YTRlOTBlZDRhMjYwMjJjMzIzYWIzMjg2NWE3NGYzOSIsImlzcyI6ImRpZDprZXk6ejZNa21VTFRyYWJYTFY3cGNNWUhDcXhmM1pWd0F1UFJaVXJHUkZ4VlYzb1dvYWZwIn0.A3PZvdIeFqfxBgBXofDqiFoT2E3ds5hrvWQd7s_o_e4am62q7xPAWY88j1tvZtSpckueu00qmcog5kveNyVPCQ"
 }

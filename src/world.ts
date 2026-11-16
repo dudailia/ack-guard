@@ -366,7 +366,11 @@ export class World {
       capability: capabilityFor(this.policy, facts.requestSignature.issuer, facts.provenance.path),
       ...(facts.identity.chain ? { links: facts.identity.chain.links.filter((l) => l.scope).map((l) => l.id) } : {}),
     })
-    await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
+    await this.audit.append("settlement", {
+      ...base,
+      tx: { ...tx, amount: tx.amount.toString() },
+      ...(facts.identity.chain ? { links: facts.identity.chain.links.filter((l) => l.scope).map((l) => l.id) } : {}),
+    })
 
     const receiptJwt = await this.receipts.issue({
       paymentRequestToken: input.paymentRequest,

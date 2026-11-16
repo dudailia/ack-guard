@@ -7,7 +7,7 @@
 | The bank needs | ACK Guard provides | Built on |
 |---|---|---|
 | A mandate the customer can read and the bank can enforce | `policy.yaml`: merchants, prices, limits and rules, each in plain English, rendered on a Policy page; a deterministic engine checks every payment against it | ACK-Pay signed payment requests |
-| Change control on that mandate | A policy diff that replays the signed history under a proposed change ("38 past payments would now need a human") before the owner signs the approval; approvals go on a signed policy log, and the guard runs only the last approved policy | owner-signed JWT |
+| Change control on that mandate | A policy diff that replays the signed history under a proposed change ("38 past payments would now need a human") before the owner signs the approval; approvals go on a signed policy log, and the live guard runs the reviewed repository policy or the last change the owner approved | owner-signed JWT |
 | Delegated authority with limits | Delegation chains owner -> agent -> sub-agent; each link has a budget, capabilities and an expiry; a child can never exceed its parent's remaining budget or capabilities, even when they pay concurrently | ACK-ID ControllerCredentials, verified link by link |
 | Payee verification and counterparty onboarding | Merchant allowlist by DID, registered payout account, registered prices | ACK-ID merchant DIDs |
 | A system of record | A hash-chained log signed by the guard; replay rebuilds any decision | did:key signatures |
@@ -25,7 +25,7 @@
 - An in-memory ledger, not real rails.
 - The owner's, agent's and guard's keys sit on one machine; in production each signs on its own device.
 - Delegation links expire but cannot be revoked early.
-- The policy diff re-decides recorded payments but cannot replay how the agent would have continued.
+- The policy diff re-decides recorded payments but cannot replay how the agent would have continued. Deleting or rolling back the policy log falls back to an older policy unless its head is anchored outside the machine.
 - A dispute pack proves what the guard signed, not that the log holds nothing else; that still needs the log head published outside the system.
 
 **What I would build next.**

@@ -216,6 +216,8 @@ export async function policyDiff(
           paymentRequestId: tx.paymentRequestId,
           merchantDid: pf?.requestSignature.issuer ?? "",
           capability: capabilityFor(curCfg, pf?.requestSignature.issuer, pf?.provenance.path),
+          // Delegation: the scoped links this payment counted against, as recorded in its facts.
+          ...(pf?.identity.chain ? { links: pf.identity.chain.links.filter((l) => l.scope).map((l) => l.id) } : {}),
         })
       }
     }

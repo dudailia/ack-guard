@@ -65,6 +65,10 @@ export async function approvePolicyChange(opts: {
   if (!diff.logVerified) throw new Error("the diff was computed on a log that does not verify; refusing to approve")
   const approver = opts.approver ?? ids.parties.owner
   const dir = opts.dir ?? POLICY_DIR
+  // A change must build on the policy in force, never on a stale one.
+  const prior = existsSync(policyLogPath(dir)) ? readEntries(policyLogPath(dir)).entries.filter((e): e is AuditEntry => !!e && e.kind === "policy_change") : []
+  const lastTo = (prior[prior.length - 1]?.payload.to as { hash?: string } | undefined)?.hash
+  if (lastTo && lastTo !== current.hash) throw new Error("this change starts from a policy that is no longer the approved one; diff against the active policy")
   const claims: ApprovalClaims = { type: "ack-guard-policy-approval", from: current.hash, to: proposed.hash, diff: diffDigest(diff), log: diff.log, logHeadHash: diff.logHeadHash }
   const jwt = await createJwt(claims as unknown as Record<string, unknown>, { issuer: approver.did, signer: approver.signer }, { alg: approver.alg })
   mkdirSync(dir, { recursive: true })
@@ -109,12 +113,19 @@ export async function loadActivePolicy(ids: Identities, dir = POLICY_DIR): Promi
     return { policy: loadPolicyFile(), source: "repository" }
   }
   const policy = parsePolicy(readFileSync(active, "utf8"))
-  const p = last.payload as { to: { hash: string }; approval: { by: string; jwt: string } }
+  // Every change must continue from the one before it (no forks or reorders).
+  for (let i = 1; i < changes.length; i++) {
+    const prevTo = (changes[i - 1]!.payload.to as { hash: string }).hash
+    if ((changes[i]!.payload.from as { hash: string }).hash !== prevTo) throw new Error(`policy change ${changes[i]!.seq} does not continue from the change before it`)
+  }
+  const p = last.payload as { from: { hash: string }; to: { hash: string }; diff: { digest: string }; approval: { by: string; jwt: string } }
   if (policy.hash !== p.to.hash) throw new Error(`${active} is not the last approved policy (hash ${policy.hash.slice(0, 12)}, approved ${p.to.hash.slice(0, 12)})`)
   if (p.approval.by !== ids.parties.owner.did) throw new Error("the last policy change was not approved by the configured owner")
   const resolver = offlineDidResolver()
   const vj = await verifyJwt(p.approval.jwt, { resolver, issuer: ids.parties.owner.did, policies: { aud: false } }).catch(() => undefined)
-  if (!vj || (vj.payload as unknown as ApprovalClaims).to !== policy.hash) throw new Error("the owner's approval signature does not cover the active policy")
+  const claims = vj?.payload as unknown as ApprovalClaims | undefined
+  if (!claims || claims.type !== "ack-guard-policy-approval" || claims.to !== policy.hash) throw new Error("the owner's approval signature does not cover the active policy")
+  if (claims.from !== p.from.hash || claims.diff !== p.diff.digest) throw new Error("the owner's approval does not match the change and diff the policy log records")
   return { policy, source: "approved", approvedAt: last.ts, approvedBy: p.approval.by }
 }
 

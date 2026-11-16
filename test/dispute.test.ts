@@ -33,7 +33,7 @@ beforeAll(async () => {
   blocked = await buildDisputePack(log, b.attemptId, { guard: ids.parties.guard, didDocuments: docs })
 }, 120_000)
 
-const clone = (p: DisputePack) => structuredClone(p)
+const clone = (p: DisputePack): DisputePack => JSON.parse(JSON.stringify(p))
 
 describe("dispute evidence pack", () => {
   it("covers task, delegation chain, policy and rule, reasoning, receipt and verification", () => {
@@ -80,6 +80,53 @@ describe("dispute evidence pack", () => {
     expect(await failing(e)).toEqual(expect.arrayContaining(["packSignature", "matchesLog"]))
 
     expect(await failing(clone(paid), ids.parties.attacker.did)).toEqual(expect.arrayContaining(["packSignature", "logEntries", "signedHead"]))
+  })
+
+  it("a forger cannot plant a DID document for the pinned guard key and re-sign the pack (review finding)", async () => {
+    const { createDidDocumentFromKeypair, createJwt, createJwtSigner, generateKeypair } = await import("agentcommercekit")
+    const { canonicalJson, entryHash } = await import("../src/audit/chain.js")
+    const { createHash } = await import("node:crypto")
+    const forged = clone(blocked)
+    const guardDid = forged.signedBy
+    const kp = await generateKeypair("Ed25519")
+    const signer = createJwtSigner(kp)
+    forged.evidence.didDocuments[guardDid] = createDidDocumentFromKeypair({ did: guardDid as `did:${string}:${string}`, keypair: kp }) as never
+    const dec = forged.evidence.entries.find((e) => e.kind === "decision")!
+    ;(dec.payload.decision as { outcome: string; rule: { id: string } }).outcome = "allow"
+    ;(dec.payload.decision as { rule: { id: string } }).rule.id = "ALL_RULES_PASSED"
+    forged.subject.outcome = "allow"
+    forged.subject.decidingRule = "ALL_RULES_PASSED"
+    const sign = (p: Record<string, unknown>) => createJwt(p, { issuer: guardDid as `did:${string}:${string}`, signer }, { alg: "EdDSA" })
+    for (const e of forged.evidence.entries) {
+      e.hash = entryHash(e)
+      e.sig = await sign({ seq: e.seq, hash: e.hash })
+    }
+    forged.evidence.head.sig = await sign({ seq: forged.evidence.head.seq, hash: forged.evidence.head.hash, head: true })
+    forged.packHash = createHash("sha256").update(canonicalJson({ ...forged, packHash: undefined, packSignature: undefined })).digest("hex")
+    forged.packSignature = await sign({ format: forged.format, packHash: forged.packHash })
+    const v = await verifyDisputePack(forged, { signer: guardDid })
+    expect(v.ok).toBe(false)
+    expect(Object.entries(v.checks).filter(([, c]) => !c.ok).map(([k]) => k)).toEqual(expect.arrayContaining(["packSignature", "logEntries", "signedHead"]))
+  })
+
+  it("every summary field is checked against the signed entries, not just the pack signature (review finding)", async () => {
+    const edits: [string, (p: DisputePack) => void][] = [
+      ["amount", (p) => (p.subject.amount = "$0.01")],
+      ["payer", (p) => (p.subject.payer = ids.parties.agent.did)],
+      ["time", (p) => (p.subject.attemptedAt = new Date(0).toISOString())],
+      ["detail", (p) => (p.subject.decidingDetail = "fits every link")],
+      ["checks", (p) => ((p.policy.checks[0] as { passed: boolean }).passed = false)],
+      ["merchant", (p) => (p.subject.merchant = "Someone Else")],
+      ["links", (p) => (p.delegation.links[1]!.scope = { budget: "99999", currency: "USD", capabilities: ["weather.history"] })],
+    ]
+    for (const [name, edit] of edits) {
+      const p = clone(blocked)
+      edit(p)
+      const v = await verifyDisputePack(p, { signer: ids.parties.guard.did, skipPackSignature: true })
+      const failed = Object.entries(v.checks).filter(([, c]) => !c.ok).map(([k]) => k)
+      expect(failed.length, name).toBeGreaterThan(0)
+      expect(failed.some((k) => k === "matchesLog" || k === "delegationChain"), `${name}: ${failed}`).toBe(true)
+    }
   })
 
   it("renders a one-page PDF", async () => {

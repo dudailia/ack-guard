@@ -102,6 +102,7 @@ for (const [ep, mine] of byEpisode) {
         paymentRequestId: tx.paymentRequestId,
         merchantDid: facts?.requestSignature.issuer ?? "",
         capability: capabilityFor(config, facts?.requestSignature.issuer, facts?.provenance.path),
+        ...(facts?.identity.chain ? { links: facts.identity.chain.links.filter((l) => l.scope).map((l) => l.id) } : {}),
       })
     }
   }
