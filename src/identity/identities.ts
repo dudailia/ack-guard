@@ -54,6 +54,8 @@ export const PARTY_NAMES = [
   "linguaImpostor",
   "freedatahub",
   "attacker",
+  // Added with delegation chains: a sub-agent the research agent delegates to.
+  "subagent",
 ] as const
 export type PartyName = (typeof PARTY_NAMES)[number]
 
@@ -69,6 +71,7 @@ const CURVES: Record<PartyName, KeyCurve> = {
   linguaImpostor: "secp256k1",
   freedatahub: "secp256k1",
   attacker: "secp256k1",
+  subagent: "secp256k1",
 }
 
 export const AGENT_DID_BASE_URL = "https://agents.ack-guard.example/research-agent"
@@ -93,11 +96,12 @@ export function generateKeyFile(): KeyFile {
 }
 
 export function loadOrCreateKeyFile(path: string): KeyFile {
-  if (existsSync(path)) {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as KeyFile
-    if (PARTY_NAMES.every((n) => parsed[n])) return parsed
-  }
-  const keys = generateKeyFile()
+  // Existing keys are never replaced: logs and results are pinned to them.
+  // Parties added in a later version get new keys alongside the old ones.
+  const keys: KeyFile = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as KeyFile) : {}
+  const missing = PARTY_NAMES.filter((n) => !keys[n])
+  if (!missing.length) return keys
+  for (const name of missing) keys[name] = { curve: CURVES[name], privateKeyHex: bytesToHexString(generatePrivateKeyBytes(CURVES[name])) }
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(keys, null, 2), { mode: 0o600 })
   return keys
@@ -125,6 +129,15 @@ export async function buildIdentities(keyFile: KeyFile = generateKeyFile()): Pro
       agentDidDocument = didDocument
       // did:web would normally resolve over HTTPS. In the sandbox the document
       // is pre-registered in the resolver cache (same approach as ACK demos).
+      resolver.addToCache(did, didDocument)
+    } else if (name === "subagent") {
+      // A did:web whose DID document names the research agent as its controller.
+      const { did: webDid, didDocument } = createDidWebDocumentFromKeypair({
+        keypair,
+        baseUrl: `${AGENT_DID_BASE_URL}/sub/forecaster`,
+        controller: parties.agent.did,
+      })
+      did = webDid
       resolver.addToCache(did, didDocument)
     } else {
       did = createDidKeyUri(keypair)

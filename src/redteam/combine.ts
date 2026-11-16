@@ -25,8 +25,21 @@ export function defaultRuns(base = "results"): string[] {
   for (const model of readdirSync(base)) {
     const mdir = join(base, model)
     if (!statSync(mdir).isDirectory()) continue
-    const full = runDirs(mdir).filter((r) => !readMeta(r).patchOf)
+    const full = runDirs(mdir).filter((r) => !readMeta(r).patchOf && !readMeta(r).suite)
     if (full.length) runs.push(full[full.length - 1]!)
+  }
+  return runs
+}
+
+/** Latest run of a separate suite (e.g. "delegation") per model directory. */
+export function suiteRuns(suite: string, base = "results"): string[] {
+  if (!existsSync(base)) return []
+  const runs: string[] = []
+  for (const model of readdirSync(base)) {
+    const mdir = join(base, model)
+    if (!statSync(mdir).isDirectory()) continue
+    const rs = runDirs(mdir).filter((r) => readMeta(r).suite === suite && !readMeta(r).patchOf)
+    if (rs.length) runs.push(rs[rs.length - 1]!)
   }
   return runs
 }

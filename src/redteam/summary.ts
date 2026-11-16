@@ -98,6 +98,7 @@ export function summarize(rows: EpisodeRow[]): Summary {
   const byCategory: Summary["byCategory"] = {}
   for (const c of CATEGORIES) {
     const rs = attacks.filter((r) => r.category === c)
+    if (!rs.length) continue
     byCategory[c] = { label: CATEGORY_LABELS[c], naive: cell(by(rs, "naive")), guarded: cell(by(rs, "guarded")) }
   }
   const rulesFired: Record<string, number> = {}

@@ -34,6 +34,7 @@ export const RULE_TITLES: Record<RuleId, string> = {
   RECIPIENT_BINDING: "Recipient is the merchant's registered payout account",
   PRICE_BINDING: "Amount and currency match the registered price for the endpoint",
   PURPOSE_BINDING: "Endpoint capability is one the task declared it needs",
+  DELEGATION_LIMITS: "Purchase fits every delegation link's capabilities and remaining budget",
   DUPLICATE_CHARGE: "Not a repeat purchase: same request, or more of a capability from one merchant than the task asked for",
   PER_PAYMENT_CAP: "Amount is within the per-payment cap",
   TASK_BUDGET: "Cumulative task spend stays within the task budget",
@@ -49,6 +50,7 @@ export const RULE_ORDER: RuleId[] = [
   "RECIPIENT_BINDING",
   "PRICE_BINDING",
   "PURPOSE_BINDING",
+  "DELEGATION_LIMITS",
   "DUPLICATE_CHARGE",
   "PER_PAYMENT_CAP",
   "TASK_BUDGET",
@@ -96,7 +98,10 @@ export function evaluatePayment(
     "AGENT_IDENTITY",
     facts.identity.ok && facts.identity.agentDid === config.agentDid && facts.identity.controller === config.ownerDid,
     facts.identity.ok
-      ? `agent ${facts.identity.agentDid} controlled by ${facts.identity.controller}`
+      ? `agent ${facts.identity.agentDid} controlled by ${facts.identity.controller}` +
+          (facts.identity.chain && facts.identity.chain.links.length > 1
+            ? `; delegated to ${facts.identity.chain.payerDid} through ${facts.identity.chain.links.length} verified links`
+            : "")
       : `identity check failed: ${facts.identity.error ?? "unknown"}`,
   )
 
@@ -170,7 +175,40 @@ export function evaluatePayment(
         : `capability ${endpoint.capability} is not among the task's declared needs [${task.needs.join(", ")}]`,
     )
 
-  // 8. Duplicate charge. Keyed on what is bought, not on the URL: the
+  // 8. Delegation limits. A sub-agent pays through a chain of links; each link
+  // may limit capabilities and budget. Spend under a link counts every payment
+  // made under it, by the child or any of its descendants, so a purchase must
+  // fit what every ancestor has left.
+  const chain = facts.identity.chain
+  const scoped = (chain?.links ?? []).filter((l) => l.scope)
+  if (!chain || !scoped.length) {
+    add("DELEGATION_LIMITS", true, chain ? "no link in the chain limits this purchase" : "no delegation: the agent pays directly for its owner")
+  } else if (!facts.identity.ok) {
+    add("DELEGATION_LIMITS", null, "requires a verified delegation chain")
+  } else if (!endpoint || amount === undefined) {
+    add("DELEGATION_LIMITS", null, "requires a registered endpoint and an amount")
+  } else {
+    let failed: string | undefined
+    const fits: string[] = []
+    for (const l of scoped) {
+      const s = l.scope!
+      const budget = BigInt(s.budget)
+      const spentUnder = history.payments.filter((p) => p.links?.includes(l.id)).reduce((a, p) => a + p.amount, 0n)
+      const who = `link ${l.index}`
+      if (!s.capabilities.includes(endpoint.capability)) {
+        failed = `${who} does not delegate ${endpoint.capability} (it allows ${s.capabilities.join(", ") || "nothing"})`
+        break
+      }
+      if (spentUnder + amount > budget) {
+        failed = `${who} budget ${formatAmount(budget)}: ${formatAmount(spentUnder)} already spent under it + ${formatAmount(amount)} > ${formatAmount(budget)}`
+        break
+      }
+      fits.push(`${who} ${formatAmount(spentUnder + amount)} of ${formatAmount(budget)}`)
+    }
+    add("DELEGATION_LIMITS", !failed, failed ?? `fits every link: ${fits.join("; ")}`)
+  }
+
+  // 9. Duplicate charge. Keyed on what is bought, not on the URL: the
   // merchant DID, the registered capability and the task. A task that needs a
   // capability more than once lists it that many times in its needs.
   if (!facts.requestSignature.ok) add("DUPLICATE_CHARGE", null, "no verified request")

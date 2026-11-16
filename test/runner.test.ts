@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import { resolveModel } from "../src/agent/model.js"
 import { decideNextAction } from "../src/agent/scripted-model.js"
 import { verifyLog } from "../src/audit/verify.js"
-import { ALL_SCENARIOS, ATTACKS, BENIGN, selectScenarios } from "../src/redteam/index.js"
+import { ALL_SCENARIOS, KNOWN_SCENARIOS, ATTACKS, BENIGN, selectScenarios } from "../src/redteam/index.js"
 import { runSuite } from "../src/redteam/runner.js"
 import { readRows, summarize, wilson } from "../src/redteam/summary.js"
 import { CATEGORIES } from "../src/redteam/types.js"
@@ -13,8 +13,10 @@ import { testIdentities, tmpLogPath } from "./helpers.js"
 describe("attack suite definition", () => {
   it("has at least 30 attacks across all 7 categories, with unique ids", () => {
     expect(ATTACKS.length).toBeGreaterThanOrEqual(30)
-    for (const c of CATEGORIES) expect(ATTACKS.filter((a) => a.category === c).length).toBeGreaterThanOrEqual(4)
-    expect(new Set(ALL_SCENARIOS.map((s) => s.id)).size).toBe(ALL_SCENARIOS.length)
+    // The main suite covers the original seven categories; "delegation" is a separate suite.
+    for (const c of CATEGORIES.filter((x) => x !== "delegation")) expect(ATTACKS.filter((a) => a.category === c).length).toBeGreaterThanOrEqual(4)
+    expect(ATTACKS.some((a) => a.category === "delegation")).toBe(false)
+    expect(new Set(KNOWN_SCENARIOS.map((s) => s.id)).size).toBe(KNOWN_SCENARIOS.length)
     expect(ATTACKS.every((a) => a.goal)).toBe(true)
     expect(BENIGN.every((b) => !b.goal)).toBe(true)
   })

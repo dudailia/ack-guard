@@ -8,7 +8,8 @@ import { verifyPaymentRequestToken, type JwtString } from "agentcommercekit"
 import { Hono } from "hono"
 import { AGENT_STARTING_BALANCE, HOSTS } from "./config.js"
 import type { AuditLog } from "./audit/chain.js"
-import type { Identities } from "./identity/identities.js"
+import { verifyDelegationChain } from "./identity/delegation.js"
+import type { Identities, PartyName } from "./identity/identities.js"
 import { verifyAgentIdentity } from "./identity/verify-identity.js"
 import { SandboxLedger } from "./ledger/sandbox-ledger.js"
 import { merchantSpecs, type MerchantKey } from "./merchants/catalog.js"
@@ -37,6 +38,17 @@ export interface WorldSetup {
   priorSpend?: { amount: bigint; hoursAgo: number }[]
   /** The policy in force; the repository policy.yaml when absent. */
   policy?: PolicyConfig
+  /**
+   * A sub-agent pays through a delegation chain (root first: owner -> agent ->
+   * ... -> payer). Without it the research agent pays with its own
+   * ControllerCredential, as in the main benchmark.
+   */
+  delegation?: {
+    payer: PartyName
+    chain: string[]
+    /** The payer's legitimate limits, root first, for scoring only (never read by the guard). */
+    limits?: { budget: bigint; capabilities: string[] }[]
+  }
 }
 
 export type Approver = (ctx: { decision: Decision; facts: PaymentFacts; task: TaskSpec }) => Promise<{ approved: boolean; by: string }>
@@ -48,6 +60,8 @@ export interface PayInput {
   paymentRequest: string
   paymentOptionId?: string
   purpose: string
+  /** Delegation scenarios only: a credential reference (cred_N) to pay under instead of the payer's own link. */
+  credential?: string
 }
 
 export type PayResult =
@@ -142,7 +156,7 @@ export class World {
     } catch (e) {
       return { status: 400, url: rawUrl, body: { error: (e as Error).message } }
     }
-    const headers: Record<string, string> = { "x-ack-controller-credential": this.ids.controllerCredential }
+    const headers: Record<string, string> = { "x-ack-controller-credential": this.presentedCredential }
     const receipt = this.receiptsByUrl.get(url)
     if (receipt) headers.authorization = `Bearer ${receipt}`
     const res = await this.net.fetch(url, { headers })
@@ -162,6 +176,40 @@ export class World {
     }
     if (res.status === 200 && receipt) this.receiptsByUrl.delete(url)
     return { status: res.status, url, body }
+  }
+
+  /** The ACK-ID credential this agent presents to merchants: its own link in the chain. */
+  get presentedCredential(): string {
+    const d = this.setup.delegation
+    return d ? d.chain[d.chain.length - 1]! : this.ids.controllerCredential
+  }
+
+  get payerDid(): string {
+    const d = this.setup.delegation
+    return d ? this.ids.parties[d.payer].did : this.ids.parties.agent.did
+  }
+
+  /** Short references for credentials seen in content (cred_1, ...), like pr_N for payment requests. */
+  private credRefToJwt = new Map<string, string>()
+  private credJwtToRef = new Map<string, string>()
+  credRefFor(jwt: string): string {
+    let ref = this.credJwtToRef.get(jwt)
+    if (!ref) {
+      ref = `cred_${this.credJwtToRef.size + 1}`
+      this.credJwtToRef.set(jwt, ref)
+      this.credRefToJwt.set(ref, jwt)
+    }
+    return ref
+  }
+
+  /** The chain a payment is made under: the payer's own, or with its last link swapped for a credential the agent chose. */
+  chainFor(input: PayInput): string[] | undefined {
+    const d = this.setup.delegation
+    if (!d) return undefined
+    if (!input.credential) return d.chain
+    const c = input.credential.trim()
+    const jwt = this.credRefToJwt.get(c) ?? c
+    return [...d.chain.slice(0, -1), jwt]
   }
 
   refFor(token: string): string {
@@ -201,6 +249,7 @@ export class World {
       paymentRequestToken: token,
       paymentOptionId: input.paymentOptionId ?? null,
       agentPurpose: input.purpose,
+      ...(this.setup.delegation ? { payer: this.payerDid, credentialRef: input.credential ?? null } : {}),
     })
     const first = await this.spend.run(() => this.decideAndSettle(input, base))
     if (first.kind === "done") return first.result
@@ -314,6 +363,7 @@ export class World {
       paymentRequestId: tx.paymentRequestId,
       merchantDid: facts.requestSignature.issuer!,
       capability: capabilityFor(this.policy, facts.requestSignature.issuer, facts.provenance.path),
+      ...(facts.identity.chain ? { links: facts.identity.chain.links.filter((l) => l.scope).map((l) => l.id) } : {}),
     })
     await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
 
@@ -377,11 +427,30 @@ export class World {
       facts.requestSignature = { ok: false, error: (e as Error).message.slice(0, 200) }
     }
     // Re-verified on every payment (signature, owner, controller claim).
-    facts.identity = await verifyAgentIdentity(this.ids.controllerCredential, {
-      resolver: this.ids.resolver,
-      expectedOwnerDid: this.policy.ownerDid,
-      expectedAgentDid: this.policy.agentDid,
-    })
+    const chain = this.chainFor(input)
+    if (chain) {
+      // Every link, every payment: signatures, expiry, controller claims, continuity from the owner to the payer.
+      const v = await verifyDelegationChain(chain, {
+        resolver: this.ids.resolver,
+        ownerDid: this.policy.ownerDid,
+        rootAgentDid: this.policy.agentDid,
+        payerDid: this.payerDid,
+      })
+      facts.identity = {
+        ok: v.ok,
+        agentDid: v.links[0]?.subject,
+        controller: v.links[0]?.issuer,
+        error: v.error,
+        chain: { payerDid: this.payerDid, links: v.links },
+      }
+    } else {
+      // Re-verified on every payment (signature, owner, controller claim).
+      facts.identity = await verifyAgentIdentity(this.ids.controllerCredential, {
+        resolver: this.ids.resolver,
+        expectedOwnerDid: this.policy.ownerDid,
+        expectedAgentDid: this.policy.agentDid,
+      })
+    }
     const seen = this.seen402.get(input.paymentRequest)
     facts.provenance = seen
       ? { ok: true, ...seen }
@@ -403,6 +472,24 @@ function peekPaymentRequest(token: string): { description?: string; options: { i
   return undefined
 }
 
+/** A delegation credential (ACK-ID ControllerCredential) seen in content, labelled for the agent. Unverified. */
+function labelCredential(token: string, world: World): string | undefined {
+  try {
+    const p = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as {
+      vc?: { type?: string[]; credentialSubject?: { delegation?: { budget?: string; capabilities?: string[] } }; expirationDate?: string }
+      iss?: string
+      sub?: string
+    }
+    if (!p.vc?.type?.includes("ControllerCredential")) return undefined
+    const d = p.vc.credentialSubject?.delegation
+    const name = (did?: string) => (did?.startsWith("did:web:") ? did.split(":").slice(-1)[0] : did)
+    const scope = d ? `, budget ${formatAmount(BigInt(d.budget ?? "0"))}, may buy ${(d.capabilities ?? []).join(", ")}` : ""
+    return `[ACK-ID delegation credential ${world.credRefFor(token)}: ${name(p.iss)} -> ${name(p.sub)}${scope}${p.vc.expirationDate ? `, expires ${p.vc.expirationDate}` : ""}]`
+  } catch {
+    return undefined
+  }
+}
+
 function safeAmount(o: { amount: string | number; decimals: number; currency: string }): string {
   try {
     if (!Number.isInteger(o.decimals) || o.decimals < 0 || o.decimals > 18) return "invalid amount"
@@ -414,7 +501,7 @@ function safeAmount(o: { amount: string | number; decimals: number; currency: st
 
 function labelFor(token: string, world: World): string {
   const pr = peekPaymentRequest(token)
-  if (!pr) return token
+  if (!pr) return labelCredential(token, world) ?? token
   const o = pr.options[0]
   const amt = o ? safeAmount(o) : "?"
   return `[ACK payment request ${world.refFor(token)}: "${pr.description ?? ""}", ${amt} to ${o?.recipient ?? "?"}]`

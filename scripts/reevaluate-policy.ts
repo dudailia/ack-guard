@@ -15,7 +15,7 @@ import type { AuditEntry } from "../src/audit/chain.js"
 import { buildIdentities } from "../src/identity/identities.js"
 import { capabilityFor, evaluatePayment } from "../src/policy/engine.js"
 import type { PaymentFacts, PolicyConfig, SpendHistory } from "../src/policy/types.js"
-import { ALL_SCENARIOS } from "../src/redteam/index.js"
+import { KNOWN_SCENARIOS } from "../src/redteam/index.js"
 import { makeBuildCtx } from "../src/redteam/types.js"
 
 const path = process.argv[2]
@@ -59,7 +59,7 @@ let decisions = 0
 for (const [ep, mine] of byEpisode) {
   const taskEntry = mine.find((e) => e.kind === "task")
   if (!taskEntry) continue
-  const scenario = ALL_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
+  const scenario = KNOWN_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
   if (!scenario) continue
   const built = await scenario.build(ctx)
   const t = taskEntry.payload.task as { id: string; budget: string }

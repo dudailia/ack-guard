@@ -8,6 +8,7 @@ export type RuleId =
   | "RECIPIENT_BINDING"
   | "PRICE_BINDING"
   | "PURPOSE_BINDING"
+  | "DELEGATION_LIMITS"
   | "DUPLICATE_CHARGE"
   | "PER_PAYMENT_CAP"
   | "TASK_BUDGET"
@@ -93,13 +94,31 @@ export interface PaymentOptionFacts {
 export interface PaymentFacts {
   requestSignature: { ok: boolean; issuer?: string; requestId?: string; description?: string; error?: string }
   option?: PaymentOptionFacts
-  identity: { ok: boolean; agentDid?: string; controller?: string; error?: string }
+  identity: {
+    ok: boolean
+    agentDid?: string
+    controller?: string
+    error?: string
+    /** Present when a sub-agent pays through a delegation chain (owner -> agent -> ... -> payer). */
+    chain?: { payerDid?: string; links: DelegationLinkFacts[] }
+  }
   /** Did this payment request arrive as a 402 response to a URL the agent called in this task? */
   provenance: { ok: boolean; url?: string; host?: string; path?: string; detail?: string }
   /** Free text from the agent. Recorded for audit, never used to decide. */
   agentPurpose: string
   /** A human approval for this exact payment request, if one was granted. */
   approval?: { approved: boolean; by: string }
+}
+
+export interface DelegationLinkFacts {
+  index: number
+  id: string
+  issuer?: string
+  subject?: string
+  scope?: { budget: string; currency: string; capabilities: string[] }
+  expiresAt?: string
+  ok: boolean
+  error?: string
 }
 
 export interface PaidRecord {
@@ -111,6 +130,8 @@ export interface PaidRecord {
   merchantDid: string
   /** The registered capability bought, when the endpoint is registered. */
   capability?: string
+  /** Delegation links (scoped) the payment was made under; spend counts against each. */
+  links?: string[]
 }
 
 export interface SpendHistory {

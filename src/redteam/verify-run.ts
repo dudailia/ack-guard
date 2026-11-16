@@ -16,7 +16,7 @@ import type { EpisodeResult } from "../agent/run-episode.js"
 import { buildIdentities, type Identities } from "../identity/identities.js"
 import type { Transfer } from "../ledger/sandbox-ledger.js"
 import type { PayResult } from "../world.js"
-import { ALL_SCENARIOS } from "./index.js"
+import { KNOWN_SCENARIOS } from "./index.js"
 import { scoreEpisode, type EpisodeScore } from "./scoring.js"
 import { readRows, type EpisodeRow } from "./summary.js"
 import { makeBuildCtx } from "./types.js"
@@ -93,7 +93,7 @@ export async function verifyRun(runDir: string, opts: { signer?: string; expecte
       if (JSON.stringify(rv) !== JSON.stringify(v)) problems.push(`row ${row.episodeId}: ${k} is ${JSON.stringify(rv)} in episodes.jsonl but ${JSON.stringify(v)} in the signed log`)
     }
     if (!!row.error !== !!end.payload.error) problems.push(`row ${row.episodeId}: error status differs from the signed log`)
-    const scenario = ALL_SCENARIOS.find((s) => s.id === tp.scenarioId)
+    const scenario = KNOWN_SCENARIOS.find((s) => s.id === tp.scenarioId)
     if (!scenario || !ids || !ctx) {
       problems.push(`unknown scenario ${String(tp.scenarioId)}`)
       continue

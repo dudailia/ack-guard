@@ -10,7 +10,13 @@ import { arg, c } from "./util.js"
 loadEnv()
 const modelId = arg("model", "qwen3:8b")!
 const runs = Number(arg("runs", "3"))
-const scenarios = selectScenarios(arg("only"))
+// --suite delegation runs the sub-agent suite; it is recorded and reported separately.
+const suite = arg("suite", "main") as "main" | "delegation"
+if (suite !== "main" && suite !== "delegation") {
+  console.error(c.red("--suite must be main or delegation"))
+  process.exit(1)
+}
+const scenarios = selectScenarios(arg("only"), suite)
 if (resolveModel(modelId).provider === "ollama" && !(await ollamaAvailable(modelId))) {
   console.error(c.red(`Ollama model ${modelId} is not available. Install Ollama and run: ollama pull ${modelId}`))
   process.exit(1)
@@ -42,7 +48,7 @@ const summary = await runSuite({
   model,
   runs,
   outDir,
-  meta: patchOf ? { patchOf, patchReason: arg("reason") } : undefined,
+  meta: { ...(patchOf ? { patchOf, patchReason: arg("reason") } : {}), ...(suite !== "main" ? { suite } : {}) },
   onEpisode: (row, done, total) => {
     firstDone ??= done - 1
     const s = row.score

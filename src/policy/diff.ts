@@ -14,7 +14,7 @@
 import { readEntries, verifyLog } from "../audit/verify.js"
 import type { AuditEntry } from "../audit/chain.js"
 import { formatAmount } from "../money.js"
-import { ALL_SCENARIOS } from "../redteam/index.js"
+import { KNOWN_SCENARIOS } from "../redteam/index.js"
 import { makeBuildCtx } from "../redteam/types.js"
 import { buildIdentities } from "../identity/identities.js"
 import { capabilityFor, evaluatePayment } from "./engine.js"
@@ -164,7 +164,7 @@ export async function policyDiff(
     if (snap) history.payments.push(...snap.map((p) => ({ ...p, amount: BigInt(p.amount) })))
     else {
       // Logs written before spendAtStart was recorded: rebuild seeded prior spend from the scenario.
-      const sc = ALL_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
+      const sc = KNOWN_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
       if (sc) {
         ctx ??= makeBuildCtx(await buildIdentities())
         const built = await sc.build(ctx)

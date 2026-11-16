@@ -14,7 +14,7 @@ import type { AuditEntry } from "../src/audit/chain.js"
 import { buildIdentities } from "../src/identity/identities.js"
 import { evaluatePayment } from "../src/policy/engine.js"
 import type { PaymentFacts, PolicyConfig, SpendHistory, TaskSpec } from "../src/policy/types.js"
-import { ALL_SCENARIOS } from "../src/redteam/index.js"
+import { KNOWN_SCENARIOS } from "../src/redteam/index.js"
 import { makeBuildCtx } from "../src/redteam/types.js"
 
 const path = process.argv[2]
@@ -59,7 +59,7 @@ for (const ep of multiPayEpisodes) {
   const taskEntry = mine.find((e) => e.kind === "task")!
   const t = taskEntry.payload.task as { id: string; prompt: string; needs: string[]; budget: string }
   const task: TaskSpec = { ...t, budget: BigInt(t.budget) }
-  const scenario = ALL_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
+  const scenario = KNOWN_SCENARIOS.find((s) => s.id === taskEntry.payload.scenarioId)
   const setup = scenario ? await scenario.build(ctx) : { priorSpend: [] }
   const startTs = Date.parse(taskEntry.ts)
   const history: SpendHistory = {

@@ -33,10 +33,13 @@ export function decideNextAction(prompt: Msg[]): { tool: "http_get" | "pay"; inp
   const groups: { kind: "url" | "token"; value: string }[][] = []
   let discovered: { kind: "url" | "token"; value: string }[] = []
   let lastPayFollowUp: string | undefined
+  // Gullible about credentials too: pay under the latest delegation credential it was offered.
+  let offeredCredential: string | undefined
 
   const scan = (text: string) => {
     // Normalize JSON-escaped slashes so URLs inside JSON strings are found.
     const t = text.replace(/\\\//g, "/")
+    for (const m of t.matchAll(/\bcred_\d+\b/g)) offeredCredential = m[0]
     const hits: { idx: number; kind: "url" | "token"; value: string }[] = []
     for (const m of t.matchAll(URL_RE)) hits.push({ idx: m.index ?? 0, kind: "url", value: m[0].replace(/[.,;:]+$/, "") })
     for (const m of t.matchAll(TOKEN_RE)) hits.push({ idx: m.index ?? 0, kind: "token", value: m[0] })
@@ -73,7 +76,8 @@ export function decideNextAction(prompt: Msg[]): { tool: "http_get" | "pay"; inp
   if (lastPayFollowUp) return { tool: "http_get", input: { url: lastPayFollowUp } }
   for (const group of [...groups].reverse()) {
     for (const d of group) {
-      if (d.kind === "token" && !paid.has(d.value)) return { tool: "pay", input: { paymentRequest: d.value, purpose: "required by the content I fetched" } }
+      if (d.kind === "token" && !paid.has(d.value))
+        return { tool: "pay", input: { paymentRequest: d.value, purpose: "required by the content I fetched", ...(offeredCredential ? { credential: offeredCredential } : {}) } }
       if (d.kind === "url" && !visited.has(d.value)) return { tool: "http_get", input: { url: d.value } }
     }
   }

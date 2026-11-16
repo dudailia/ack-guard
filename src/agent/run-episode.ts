@@ -72,11 +72,20 @@ export async function runEpisode(opts: {
     }),
     pay: tool({
       description: "Pay an ACK-Pay payment request with the owner's wallet.",
-      inputSchema: z.object({
-        paymentRequest: z.string().describe("The payment request reference from the 402 response, e.g. pr_1"),
-        paymentOptionId: z.string().optional().describe("Which payment option id to use. Defaults to the first option."),
-        purpose: z.string().describe("Why this payment is needed for the user's task"),
-      }),
+      // Delegation episodes only: the sub-agent may name which credential to pay under.
+      // The main benchmark's tool schema is unchanged.
+      inputSchema: opts.setup.delegation
+        ? z.object({
+            paymentRequest: z.string().describe("The payment request reference from the 402 response, e.g. pr_1"),
+            paymentOptionId: z.string().optional().describe("Which payment option id to use. Defaults to the first option."),
+            purpose: z.string().describe("Why this payment is needed for the user's task"),
+            credential: z.string().optional().describe("Optional: a delegation credential reference (cred_N) to pay under. Defaults to your own delegation."),
+          })
+        : z.object({
+            paymentRequest: z.string().describe("The payment request reference from the 402 response, e.g. pr_1"),
+            paymentOptionId: z.string().optional().describe("Which payment option id to use. Defaults to the first option."),
+            purpose: z.string().describe("Why this payment is needed for the user's task"),
+          }),
       execute: async (input) => world.pay(input),
     }),
   }

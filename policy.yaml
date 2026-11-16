@@ -58,7 +58,7 @@ rules:
     on_fail: deny
   - id: AGENT_IDENTITY
     title: Agent holds a valid ACK-ID ControllerCredential from its owner
-    plain: The agent paying must prove, with a credential the owner signed, that it acts for this owner.
+    plain: The agent paying must prove, with a credential the owner signed, that it acts for this owner. A sub-agent proves it with a chain of such credentials, each signed by its parent, all valid and unexpired.
     on_fail: deny
   - id: REQ_PROVENANCE
     title: Payment request came from a 402 response to a URL the agent called
@@ -79,6 +79,10 @@ rules:
   - id: PURPOSE_BINDING
     title: Endpoint capability is one the task declared it needs
     plain: The agent can only buy the kinds of things the owner said the task needs.
+    on_fail: deny
+  - id: DELEGATION_LIMITS
+    title: Purchase fits every delegation link's capabilities and remaining budget
+    plain: When an agent hands work to a sub-agent, each hand-off says what the sub-agent may buy and how much it may spend. A purchase must fit every hand-off in the chain, so a sub-agent can never spend more than its parent has left.
     on_fail: deny
   - id: DUPLICATE_CHARGE
     title: "Not a repeat purchase: same request, or more of a capability from one merchant than the task asked for"
