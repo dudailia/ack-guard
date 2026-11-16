@@ -2,7 +2,7 @@
 // SSE from the demo log, or any recorded run), replay view, tamper demo, and a
 // human-approval queue for live guarded runs. Binds to 127.0.0.1 only.
 
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -85,8 +85,9 @@ export function createDashboard(opts: DashboardOptions) {
     if (existsSync(base)) {
       for (const model of readdirSync(base)) {
         const mdir = join(base, model)
-        if (!existsSync(mdir) || !readdirSync(mdir).length) continue
+        if (!statSync(mdir).isDirectory()) continue
         for (const run of readdirSync(mdir)) {
+          if (!statSync(join(mdir, run)).isDirectory()) continue
           const s = join(mdir, run, "summary.json")
           if (!existsSync(s)) continue
           const metaPath = join(mdir, run, "meta.json")

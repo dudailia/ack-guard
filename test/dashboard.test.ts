@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -40,6 +40,14 @@ describe("dashboard API", () => {
     expect((await (await app.request(`${BASE}/api/verify`)).json()).ok).toBe(true)
 
     expect(await (await app.request(`${BASE}/`)).text()).toContain("ACK Guard")
+
+    // results/ may contain plain files (RESULTS.md) next to run directories
+    mkdirSync(join(root, "results", "m", "run1"), { recursive: true })
+    writeFileSync(join(root, "results", "RESULTS.md"), "# x")
+    writeFileSync(join(root, "results", "m", "run1", "summary.json"), "{}")
+    const runs = await app.request(`${BASE}/api/runs`)
+    expect(runs.status).toBe(200)
+    expect((await runs.json()).runs.length).toBe(1)
   })
 
   it("reports logs from another key as not pinned", async () => {
