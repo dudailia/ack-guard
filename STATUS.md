@@ -1,6 +1,14 @@
 # STATUS
 
-Last updated: 2026-11-16. The three features (readable policy, delegation chains, dispute packs) are done, measured and documented. Nothing is pushed or published.
+Last updated: 2026-11-16. Published.
+
+- Repo: https://github.com/dudailia/ack-guard (public)
+- Live demo: https://dudailia.github.io/ack-guard/ (GitHub Pages, deployed by GitHub Actions from `site/`)
+- Release: https://github.com/dudailia/ack-guard/releases/tag/v1.0 (`demo.mp4`, `memo.pdf`; the guard DID and the three log head hashes are in the notes, as the external anchor)
+
+Before the first push, the history was rewritten once to set the author and committer to the GitHub no-reply address; every commit's tree is unchanged, and `results/COMMIT-MAP.md` maps the hashes cited by the results to the published ones. `.env` is gitignored, untracked and in no commit.
+
+Checked after publishing: a signed-out clone installs, runs the live guided demo (paid, blocked by REQ_PROVENANCE, tampering detected), serves the Policy page, reproduces the README with `pnpm report` and verifies both example dispute packs; the live Pages site loads, verifies its log in the browser and runs the guided replay with no console errors.
 
 ## Recorded results
 
@@ -65,9 +73,5 @@ The docs state what this run did not exercise:
   - the live demo runs the legit purchase (paid), FI-01 (blocked by REQ_PROVENANCE) and DL-03 (overreach blocked by DELEGATION_LIMITS), and serves the Policy page
 
 ## Needs you
-- **Claude runs:** still waiting on `ANTHROPIC_API_KEY` in `.env` and your choice of settings. The estimate for 450 episodes is about $13 with thinking off or $25 to $35 with adaptive thinking; the delegation suite adds about $2.
-- **Publishing (your go):**
-  - push the repo
-  - enable GitHub Pages ("GitHub Actions" as the source)
-  - add links to LINKEDIN.md
-  - post the guard DID and head hashes from `results/RESULTS.md` outside the repo
+- **Frontier-model run (deferred until after the email to Catena):** `pnpm redteam --model claude-sonnet-5-5 --runs 5` and `pnpm redteam --suite delegation --model claude-sonnet-5-5 --runs 5`, thinking off (about $13 plus $2). Needs `ANTHROPIC_API_KEY` in `.env`, which does not exist yet. The README's "What's next" says the run is planned.
+- **LinkedIn:** `LINKEDIN.md` is ready with the repo and live demo links; post it when you choose.
