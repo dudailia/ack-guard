@@ -11,10 +11,12 @@ Last updated: 2026-11-15, late night. Overnight hardening plan in progress.
 - Video recorder (`pnpm record-demo`) and INTERVIEW-QUIZ.md
 - 70 tests passing
 
+- Review round 3 fixes (commit 5885950): port/scheme duplicate bypass, emptied-log restart, numbers re-derived from the signed log (`verifyRun`), approvals outside the payment lock, receipts bound to the quoted resource, splitting attacks that hit the cumulative caps. 77 tests.
+- Pre-fix run committed and marked superseded; the first attempt at the final run was stopped at 41/450 when review 3 found behavior-affecting issues (moved to `.data/aborted-final-20261116`, not used).
+
 ## In progress
-1. Pre-fix benchmark (3 runs) finishing in `results/qwen3-8b/run-20261115/`. When done: mark it superseded in its meta.json and run `scripts/check-concurrent-payments.ts` on it.
-2. Then the final benchmark: `pnpm redteam --model qwen3:8b --runs 5 --out results/qwen3-8b/final-<date>` on a clean commit.
-   If interrupted: `pnpm redteam --model qwen3:8b --runs 5 --resume results/qwen3-8b/final-<date>` (it refuses if the code changed).
+2. Final benchmark running at commit 5885950: `results/qwen3-8b/final-20261116/`, log `.data/bench-final.log`.
+   If interrupted: `git checkout 5885950 -- src && pnpm redteam --model qwen3:8b --runs 5 --resume results/qwen3-8b/final-20261116` (it refuses if src changed).
 3. After it: `pnpm report`, dashboard screenshot, `pnpm record-demo` with qwen3, MEMO and LinkedIn, review round 2, full checks.
 
 ## Waiting on the user
