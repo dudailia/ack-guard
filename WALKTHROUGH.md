@@ -27,6 +27,10 @@ ACK functions this project calls (all from `agentcommercekit@0.11.0`):
 | `createPaymentReceipt`, `signCredential` | `src/receipts/receipt-service.ts` | Receipts |
 | `verifyPaymentReceipt` | `src/receipts/receipt-service.ts` (`checkReceipt`) | Merchants, replay and tests verify receipts |
 | `createJwt`, `verifyJwt` | `src/audit/chain.ts`, `src/audit/verify.ts` | Signing and verifying audit entries with the guard's DID |
+| `createCredential` (type `ControllerCredential`, with an expiry), `signCredential` | `src/identity/delegation.ts` | Delegation links: a parent vouches for a child, with a budget and capabilities |
+| `parseJwtCredential`, `verifyParsedCredential`, `getControllerClaimVerifier` | `src/identity/delegation.ts` | Verifying every link of a delegation chain on every payment |
+| `verifyJwt` with `policies.now` | `src/identity/delegation.ts`, `src/dispute/pack.ts` | Checking a link as of the payment time, for dispute evidence |
+| `createJwt` | `src/policy/approvals.ts`, `src/dispute/pack.ts` | The owner's signature on a policy change; the guard's signature on a dispute pack |
 
 ## 3. Components, in the order a payment travels
 
@@ -193,8 +197,40 @@ It is a Hono server bound to 127.0.0.1 serving one page with no build step. It h
 - the replay panel
 - a human-approval queue
 - a tamper button, which flips a blocked decision to "allow" in a copy of the log and shows verification catching it
+- in the replay of a sub-agent payment, the delegation chain link by link, and download links for the attempt's dispute evidence pack (PDF and signed JSON)
+- a **Policy** page (`/policy`): the active policy in plain language, a box to propose a change, the diff against any of the tool's logs, and "Approve and sign this change", which is offered only after a diff and only for exactly the diffed policy
 
 Log paths are restricted to logs the tool itself wrote, and all model or attacker text is HTML-escaped. The API refuses other Host headers (DNS rebinding) and cross-site writes: approving a payment needs a same-origin `Origin` header and a JSON body, and approval ids are random. Without that, any web page open in the same browser could approve a pending payment.
+
+### 3.11 The policy file, the diff and signed approvals (`policy.yaml`, `src/policy/`)
+
+`policy.yaml` is the guard's whole configuration. Merchants are named by key; their DIDs and payout accounts come from the operator's key registry, so the file holds no keys or account numbers. Rule order is fixed by the engine (a test checks the file lists exactly the engine's rules, in order, with the engine's titles); the file can switch a rule off, except the signature and identity checks, or send its failures to a human (`on_fail: escalate`). A test pins the loaded configuration to the merchant catalog and limits the recorded benchmark used, so moving the policy into the file changed no recorded decision (`scripts/reevaluate-policy.ts` confirms it on the recorded logs).
+
+The policy version is the SHA-256 of the canonical JSON of the parsed file, so comments and formatting do not change it. Every new decision and task entry records the version, and task entries record the spend history snapshot the diff needs.
+
+`policyDiff` (`src/policy/diff.ts`) refuses a log that does not verify against the pinned guard key. For every guarded decision it rebuilds the spend history from the settlements recorded before it, then evaluates the recorded facts under the current and the proposed policy with today's engine. It reports each change with the rule before and after, the policy differences in plain English, and two honest caveats: changes that come after an earlier change in the same episode (the agent might not have got there), and recorded decisions today's engine no longer reproduces.
+
+An approval (`src/policy/approvals.ts`) is a JWT signed by the owner over the old and new policy hashes and a digest of the diff that was shown; approving a different policy than the one diffed is refused. The guard appends a `policy_change` entry with the policy text to a separate signed policy log and writes the active policy file. `loadActivePolicy` accepts that file only if the policy log verifies, its last change is exactly that file, and the owner's signature covers it. The live demo refuses to start otherwise, and records each switch in its own log so later decisions are read against the right policy.
+
+### 3.12 Delegation chains (`src/identity/delegation.ts`)
+
+A link is an ACK-ID `ControllerCredential` from parent to child, built with ACK's `createCredential` so it can carry `delegation: { budget, currency, capabilities }` next to the controller claim, plus an `expirationDate`. The sub-agent has a did:web whose DID document names the research agent as controller, the same pattern ACK uses for the agent and its owner.
+
+`verifyDelegationChain` runs ACK's `parseJwtCredential` and `verifyParsedCredential` (signature, expiry, trusted issuer, controller claim) on each link, requires link 0 to come from the owner to the configured agent, each later link to be issued by the previous subject, and the last subject to be the payer. The guard runs it on every payment; the result is the `AGENT_IDENTITY` fact, and the verified links feed `DELEGATION_LIMITS`. Each settled payment records the ids of the scoped links it was made under, so "spent under link L" is the sum over L's whole subtree, and a purchase must fit every link. A parent that signs its child a bigger budget than it has gains nothing: the parent's own link still binds.
+
+The sub-agent's `pay` tool takes an optional `credential` (`cred_N`): credentials found in content get short references like payment requests do, so the model can be tempted to pay under one. That argument exists only in delegation episodes; the main benchmark's tool schema is unchanged. Each payment attempt logs the exact chain JWTs it used.
+
+Measured on qwen3: the sub-agent exceeded its delegation in 9 of 25 attack runs without the guard and 0 of 25 with it. The model never paid under an offered credential and never paid in parallel, so those paths are covered by the scripted suite and the property test only; see the README's delegation section for the full breakdown.
+
+Adding the sub-agent needed a new key. The key file used to be regenerated when a party was missing, which would have replaced the guard key the recorded results are pinned to; it now only adds missing keys. Checked by hand after the change: every existing key is byte-for-byte the same and the guard DID is unchanged.
+
+### 3.13 Dispute evidence packs (`src/dispute/`)
+
+`buildDisputePack` starts from the replay of one attempt and adds what a third party needs to check it without this tool's word: the raw signed log entries the claims rest on, the signed head, the chain JWTs, the ACK payment request and receipt, and the did:web documents needed offline. It computes the verification results, then the guard signs a JWT over the SHA-256 of the canonical pack.
+
+`verifyDisputePack` recomputes everything from the file: the pack hash and signature; every included entry's hash and guard signature; the signed head; that the pack's outcome, rule, task, chain, transaction and receipt match the signed entries; the payment request and receipt with ACK's verifiers; and the delegation chain as of the payment time, using ACK's `verifyJwt` with the clock set to the payment (the suite's links expire two hours after issue; a test checks that a chain valid at payment time still verifies after it expires, and that a forged one never does). What it cannot show is that the log holds no other entries about the same payment; for that, verify the whole log against an independently published head.
+
+The PDF (`src/dispute/pdf.ts`, pdf-lib, standard fonts) is one page for people; the JSON is the evidence.
 
 ## 4. Running and verifying
 
@@ -205,6 +241,10 @@ pnpm redteam --model scripted --runs 1     # whole suite offline in seconds
 pnpm redteam --runs 5                      # the real benchmark on qwen3:8b
 pnpm replay                                # list attempts in the newest log
 pnpm verify-log --log results/qwen3-8b/<run>/audit.jsonl
+pnpm redteam --suite delegation --runs 5   # the sub-agent suite on qwen3:8b
+pnpm policy-diff my-policy.yaml --log results/qwen3-8b/final-20261116/audit.jsonl
+pnpm dispute "DL-04/guarded/r1#1" --log results/qwen3-8b/delegation-20261116/audit.jsonl
+pnpm dispute-verify docs/examples/dispute-blocked.json --signer <guard DID>
 ```
 
 To see tamper detection by hand: change any value inside a `payload` in a log under `.data/live/` (an amount, a rule id, a word), then run `pnpm verify-log --log <that file>`. It prints the exact entry. Hashes are computed over canonical JSON, so a rewrite that leaves the JSON's meaning identical (re-escaping a character, writing `0` as `0.0`) is not a change and is not reported.
@@ -218,6 +258,8 @@ To see tamper detection by hand: change any value inside a `payload` in a log un
   - An approval never turns a deny into an allow.
   - Cumulative spend never exceeds the task budget or the daily cap, under any order of payments and under random concurrent batches through the real payment path.
   - Every random corruption of a log is detected at the right position.
+  - Under random concurrent batches from a parent and its child, the ledger never exceeds the parent's link. Removing the subtree spend from `DELEGATION_LIMITS` makes it fail.
+- **Delegation, policy and dispute tests** (`test/delegation.test.ts`, `test/policy-file.test.ts`, `test/policy-diff.test.ts`, `test/dispute.test.ts`): every way a chain can be wrong, a child capped by its parent, policy changes diffed and approved (and every forged approval refused), and every way a dispute pack can be altered.
 
 ## 5. Questions you should expect
 

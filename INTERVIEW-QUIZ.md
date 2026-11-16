@@ -1,4 +1,4 @@
-# Interview practice: 21 questions about ACK Guard
+# Interview practice: 30 questions about ACK Guard
 
 These are the questions a Catena engineer is likely to ask, with model answers. Cover the answer, say yours out loud, then compare. The numbers come from `results/` and the README; re-read them before the interview.
 
@@ -172,3 +172,63 @@ Each would have biased the results, and each is documented.
 - Five runs per scenario.
 
 The confidence intervals are in the report. I would want a frontier model, attacks written by someone else, and a merchant integration on a real testnet before claiming more.
+
+---
+
+## Readable policy, delegation chains and dispute evidence
+
+**22. Why move the policy into a YAML file? Isn't code more precise?**
+
+The rules stay in code: the engine and their order are fixed and tested. The file holds what an owner or a compliance officer has to own: which merchants, what prices, which limits, which rules are on, and whether a failure is refused or sent to a human. Each rule has a one-sentence plain-English line, and the Policy page renders it for a non-engineer. A test pins the file to the configuration the benchmark ran with, so the move changed no recorded decision. The file cannot switch off the signature or identity checks.
+
+**23. How does the policy diff work, and what can't it tell you?**
+
+It verifies a signed audit log against the pinned guard key first. Then, for every recorded guarded decision, it rebuilds the spend history from the settlements recorded before that decision and evaluates the recorded facts twice with today's engine: under the current policy and under the proposed one. It lists every change as now allowed, now blocked, now held for a human, or a different reason. What it can't know is how the agent would have continued after a decision that comes out differently; it marks later changes in the same episode as indicative. Example: on the recorded benchmark, lowering the approval threshold to $0.40 sends 38 past payments to a human.
+
+**24. What stops someone from editing the active policy on disk?**
+
+The live guard loads a changed policy only if the signed policy log verifies, its last `policy_change` entry is exactly the active file's hash, and that entry carries a JWT signed by the configured owner over the old hash, the new hash and a digest of the diff that was shown. Editing the file, editing the log, or an approval signed by anyone else is refused, and the demo will not start. The honest caveat: in this demo the owner's key is on the same machine as the guard's. In production the owner signs on their own device and the guard only verifies.
+
+**25. How is a delegation link represented, and why not invent a new credential?**
+
+It is an ACK-ID `ControllerCredential` made with ACK's `createCredential`: issuer the parent, subject the child, controller claim the parent, plus a `delegation` object (budget, currency, capabilities) and an expiry. The child's did:web document names the parent as controller, exactly the pattern ACK uses for an agent and its owner, so ACK's own verifiers check every link. A new credential type would need its own verifier and would not interoperate.
+
+**26. How does the guard make sure a child never exceeds its parent's remaining budget?**
+
+Every settled payment records the ids of the scoped links it was made under. Spent under a link is the sum over its whole subtree, so the parent's own purchases and every descendant's count together. A purchase must fit every link: allowed by each one's capabilities, and within what each one has left. A parent that signs its child a $10 link when it only has $1 gains nothing, because the parent's $1 link still binds. All decisions run under one lock in the shared spend store, so concurrent payments from parent and child are decided one at a time; a property test fires random concurrent batches from both and checks the ledger.
+
+**27. What do the delegation attacks show?**
+
+The sub-agent is the LLM; its hand-off note tries to make it overspend. There are five attacks:
+- a forged "upgraded" credential (wrong key)
+- an expired broader one
+- more work than its budget covers
+- a genuine re-issue that exceeds the parent's own limits
+- a parallel burst
+
+With the scripted agent the guard refuses the first two on `AGENT_IDENTITY` and the rest on `DELEGATION_LIMITS`. On qwen3 the sub-agent exceeded its delegation in 9 of 25 runs without the guard and 0 of 25 with it, and the benign hand-offs completed 10 of 10 in both modes. Be precise about the limits: qwen never paid under an offered credential and never paid in parallel, so the forged, expired and concurrent cases rest on the scripted test and the property test. And inside its delegation the guarded sub-agent still bought forecasts it did not need, $2.00 over 8 runs: bounded by the delegation, not prevented.
+
+**28. What is in a dispute evidence pack, and what does it prove?**
+
+It contains:
+- the task as the owner set it
+- the delegation chain
+- the policy version and every rule's result
+- the agent's steps before the payment
+- the ACK payment request and receipt
+- the verification results
+- the raw signed log entries those claims rest on, with the signed head
+- the did:web documents needed offline
+
+The whole bundle is signed by the guard. `pnpm dispute-verify` checks it from the file alone, including the chain as of the payment time. It proves what the guard recorded and signed for that attempt. It does not prove the log holds nothing else about the payment; that needs the full log checked against an independently published head hash.
+
+**29. A delegation link expired last week. Can the pack for a payment made under it still verify?**
+
+Yes. The verifier checks each link's signature and expiry with ACK's `verifyJwt`, with the clock set to the payment time, then runs ACK's controller-claim verifier. A link valid then still verifies. A forged link never does, at any time. A test covers both.
+
+**30. How do these three map to what a trust bank needs?**
+
+- **policy.yaml with diff and signed approvals:** a mandate the owner can read, plus change control. Every change is reviewed against real history and approved with the owner's key on a signed record.
+- **Delegation chains:** delegated authority with limits that compound down the chain. That is what lets an institution say "this sub-agent spent under this mandate, within these limits".
+- **Dispute packs:** the evidence for a chargeback or a complaint, in a form the other side can verify without trusting the bank's systems.
+
