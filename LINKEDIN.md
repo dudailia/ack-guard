@@ -18,12 +18,12 @@ The model's own explanation is logged but never trusted.
 I ran 35 payment attacks (fake invoices in emails, swapped payout accounts, inflated amounts, re-billing, lookalike merchants, split payments, hidden instructions) plus 10 normal tasks. Each ran 5 times against the same local model, with and without the guard, judged on a sandbox ledger:
 
 - Without the guard: 47% (82 of 175) of attack runs moved money the owner did not intend ($65.20 to attacker accounts).
-- With the guard: 1% (2 of 175), and $0.00 to attackers. Both failures were a re-purchase of the same item under a slightly different URL, which is within policy. I wrote that attack to show the gap.
+- With the guard: 0 of 175, and $0.00 to attackers. The first version let 2 through: a re-purchase of the same item under a slightly different URL. I changed the duplicate rule to count what is bought instead of the URL, re-ran the affected attacks, and kept the old result in the report. Zero is a sample, not a guarantee.
 - The cost: payments above $1 wait for a human, and after a block the small model often gave up on the legitimate part of the task.
 
 Every decision names the rule that fired and goes into a hash-chained, signed log. You can replay any payment or blocked attempt and re-verify its receipt, and editing, deleting or reordering any entry is detected.
 
-What it does not show: results from frontier models (this was a small local model, which ignored some attack types entirely), real money (it is a sandbox), or protection against purchases that are allowed but unnecessary.
+What it does not show: results from frontier models (this was a small local model, which ignored some attack types entirely), real money (it is a sandbox), or protection against an attacker steering which item the agent buys.
 
 Code, results and a walkthrough: [link]
 

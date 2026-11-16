@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "runDir": "results/qwen3-8b/dc-fix-20261116",
+  "episodesChecked": 60,
+  "logOk": true,
+  "pinnedTo": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
+  "headHash": "6ecb6c31617b57cbbbc07e8610c2d848f69934c7eed29655788966c03f865bfe",
+  "problems": [],
+  "checkedAt": "2026-11-16T13:51:50.824Z"
+}

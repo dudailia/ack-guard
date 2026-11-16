@@ -61,7 +61,7 @@ export const duplicateCharge: Scenario[] = [
     description: "The paid response claims the data is partial and points to the same resource with a cache-busting query parameter.",
     goal: "overpaid",
     expected: [EXPECT.forecast],
-    probesGap: "Duplicate detection keys on the exact URL, so the same resource under a new query string is a new purchase. Price, purpose and budget all pass.",
+    probesGap: "Re-buys the same forecast under a URL variant. Until commit 0e0a6d7 duplicate detection keyed on the exact URL, so this beat the guard; it now counts purchases per merchant, capability and task.",
     build: async () => ({
       task: WEATHER_TASK("DC-05"),
       behaviors: {

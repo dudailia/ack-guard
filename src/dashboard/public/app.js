@@ -72,7 +72,9 @@ function renderRun() {
     (total && s.episodes < total && !meta.patchOf ? `, recording: ${s.episodes} of ${total} episodes so far` : "") +
     (meta.superseded ? `. Pre-fix run, superseded: ${meta.supersededReason || "kept for the record"}` : "") +
     (run.verification?.ok && (run.verification.combined || run.verification.headHash === meta.headHash)
-      ? `. All ${run.verification.episodesChecked} rows re-derived from the signed logs`
+      ? run.verification.combined
+        ? `. Every row of the base run and the re-runs (${run.verification.episodesChecked} in all, ${s.episodes} shown) re-derived from their signed logs`
+        : `. All ${run.verification.episodesChecked} rows re-derived from the signed log`
       : total && s.episodes >= total
         ? ". Not yet checked against the signed log (run pnpm report)"
         : "")

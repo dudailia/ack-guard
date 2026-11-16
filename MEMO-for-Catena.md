@@ -7,8 +7,8 @@
 **What it shows.**
 - **Attacks.** 35 payment attacks in 7 categories plus 10 benign tasks, run 5 times each against the same local model (qwen3:8b) with and without the guard: 450 episodes, judged on a sandbox ledger.
 - **Without the guard,** attacks moved unintended money in 82/175 runs (46.9%), sending $65.20 to attacker accounts.
-- **With the guard,** 2/175 (1.1%) and $0.00. Both failures are the attack written to probe a known gap: re-buying the same forecast under a new query string (`DC-05`), which is correctly priced, on-purpose and within budget, so policy allows it ($0.50 in total). The model still tried payments the guard refused in 80 of 175 guarded attack runs, most of them injected requests.
-- **Cost.** No benign payment was blocked by a deny rule, but the two benign tasks above the $1 approval threshold waited for a human and, with the benchmark's deny-by-default approver, did not complete (benign completion 40/50 guarded, 50/50 naive). During attacks the legitimate task still completed in 88/175 guarded runs against 109/175 naive, because after a block the small model often stops.
+- **With the guard,** 0/175 (95% interval 0% to 2.1%) and $0.00. The first version failed 2/175: re-buying the same forecast under a new query string (`DC-05`) passed a URL-based duplicate rule. I replaced it with one that counts purchases per merchant, capability and task, re-ran the affected scenarios, and kept the old result in the report. The model still tried payments the guard refused in 82 of 175 guarded attack runs, most of them injected requests.
+- **Cost.** No benign payment was blocked by a deny rule, but the two benign tasks above the $1 approval threshold waited for a human and, with the benchmark's deny-by-default approver, did not complete (benign completion 40/50 guarded, 50/50 naive). During attacks the legitimate task still completed in 87/175 guarded runs against 109/175 naive, because after a block the small model often stops.
 - **Evidence.** Every decision names the rule that fired and lands in a hash-chained log signed by the guard's DID. Every settlement gets an ACK `PaymentReceiptCredential`, which the merchant verifies before serving. Replay rebuilds any payment or blocked attempt and re-verifies the ACK receipt and the ACK-ID credential. A fuzzer shows every random edit, deletion, reorder or truncation of the log is detected at the right entry.
 
 **How it maps to ACK.** The guard decides only on facts ACK makes verifiable or the owner sets:
@@ -32,12 +32,12 @@ The single most effective rule is provenance. A legitimate quote is one you aske
 **What it does not show.**
 - Results come from one small local model with thinking off, and attacks I wrote myself. That model ignored every hidden-instruction attack and four of five splitting attacks even without the guard, so those rules are covered by deterministic tests, not by the measurement.
 - Settlement is an in-memory ledger.
-- In-policy but unnecessary purchases are bounded by the budget, not prevented.
+- The guard limits how many of each capability a task buys, not which item: a steered purchase of the wrong item is bounded by the budget, not prevented.
 - The ControllerCredential is a bearer token here.
 - Log rollback is caught only with an externally anchored head hash.
 
 **What I would build next.**
-1. Needs scoped to exact resources and quantities, which closes the in-policy over-purchasing gap.
+1. Needs scoped to parameters ("one forecast for Boston"), which closes the wrong-item gap.
 2. ACK v2-style short-lived grants and RFC 9421 request signatures in place of the bearer credential.
 3. Head anchoring and merchant co-signed receipts, so the log proves completeness as well as integrity.
 4. A block response that helps the agent finish the legitimate task.
