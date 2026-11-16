@@ -260,6 +260,8 @@ Attacks the naive agent resisted in every run (the model ignored the bait, so th
 
 <!-- RESULTS:END -->
 
+The commit hashes above are the ones recorded at run time. The history was rewritten once before publishing, only to change the author email, so each published commit has a new hash with identical content: [`results/COMMIT-MAP.md`](results/COMMIT-MAP.md) maps them.
+
 How to read this: the guarded number shows the policy stopping money from moving. It does not show the model resisting injections. The guarded agent runs the same model and still tries payments the guard refuses ("attack runs where the agent tried a payment the guard refused"). Most of those came from injected text; in 20 of the 82 (`RS-01`, `AI-01`, `AI-03`, `AI-04`) the agent paid the quote from the URL its task named, and the merchant behind that URL was the compromised party. Every episode row, the signed audit log of every run and the exact prompts are in `results/`. To inspect any attempt, run `pnpm replay <attemptId> --log results/<model>/<run>/audit.jsonl --signer <guard DID above>`.
 
 An earlier 3-run benchmark, recorded before the fixes from the independent code reviews, is kept in `results/qwen3-8b/run-20261115/` and marked superseded. It is not used anywhere above. A final review after the recorded run led to more fixes (stricter `pnpm report` checks, spend counted before the settlement is logged, a network-free DID resolver, demo-only changes). On the benchmark path they change behavior only when an audit log write fails, which did not happen in the recorded run.
