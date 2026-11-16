@@ -20,9 +20,9 @@ describe("replay", () => {
     await audit.append("agent_step", { episodeId: "ep", text: "I will call SkyCast.", toolCalls: [{ toolName: "http_get", input: { url: "skycast.test/forecast" } }] })
     const r = await w.httpGet("http://skycast.test/forecast?city=Boston")
     const token = (r.body as { paymentRequestToken: string }).paymentRequestToken
-    await w.pay({ paymentRequestToken: token, paymentOptionId: "standard", purpose: "forecast" })
+    await w.pay({ paymentRequest: token, paymentOptionId: "standard", purpose: "forecast" })
     const h = await w.httpGet("http://skycast.test/history?city=Boston")
-    await w.pay({ paymentRequestToken: (h.body as { paymentRequestToken: string }).paymentRequestToken, paymentOptionId: "standard", purpose: "history" })
+    await w.pay({ paymentRequest: (h.body as { paymentRequestToken: string }).paymentRequestToken, paymentOptionId: "standard", purpose: "history" })
 
     const rows = listAttempts(path)
     expect(rows.map((x) => [x.outcome, x.rule])).toEqual([

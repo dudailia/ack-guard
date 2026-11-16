@@ -41,7 +41,8 @@ export type Approver = (ctx: { decision: Decision; facts: PaymentFacts; task: Ta
 export const denyAllApprover: Approver = async () => ({ approved: false, by: "scripted-approver (deny by default)" })
 
 export interface PayInput {
-  paymentRequestToken: string
+  /** A short reference such as "pr_1" (assigned by the HTTP tool) or a raw ACK payment request token. */
+  paymentRequest: string
   paymentOptionId?: string
   purpose: string
 }
@@ -69,6 +70,9 @@ export class World {
   private seen402 = new Map<string, Seen402>()
   /** Receipts obtained, keyed by URL, auto-attached on the next GET (like an x402 client). */
   private receiptsByUrl = new Map<string, string>()
+  /** Short references for payment request tokens seen anywhere (pr_1, pr_2, ...). Same for both modes. */
+  private refToToken = new Map<string, string>()
+  private tokenToRef = new Map<string, string>()
   private identityCheck?: IdentityVerification
   attemptCounter = 0
   readonly outcomes: { attemptId: string; result: PayResult; decision?: Decision }[] = []
@@ -148,12 +152,35 @@ export class World {
     return { status: res.status, url, body }
   }
 
+  refFor(token: string): string {
+    let ref = this.tokenToRef.get(token)
+    if (!ref) {
+      ref = `pr_${this.tokenToRef.size + 1}`
+      this.tokenToRef.set(token, ref)
+      this.refToToken.set(ref, token)
+    }
+    return ref
+  }
+
+  resolvePaymentRequest(refOrToken: string): string {
+    const t = refOrToken.trim()
+    return this.refToToken.get(t) ?? t
+  }
+
+  /** What the agent's http_get tool returns: payment request tokens are replaced by short references. */
+  async httpGetForAgent(url: string) {
+    return renderHttpForAgent(await this.httpGet(url), this)
+  }
+
   async pay(input: PayInput): Promise<PayResult> {
     const attemptId = `${this.episodeId}#${++this.attemptCounter}`
     const base = { episodeId: this.episodeId, attemptId, mode: this.mode }
+    const token = this.resolvePaymentRequest(input.paymentRequest)
+    input = { ...input, paymentRequest: token }
     await this.audit.append("payment_attempt", {
       ...base,
-      paymentRequestToken: input.paymentRequestToken,
+      paymentRequestRef: this.tokenToRef.get(token) ?? null,
+      paymentRequestToken: token,
       paymentOptionId: input.paymentOptionId ?? null,
       agentPurpose: input.purpose,
     })
@@ -231,7 +258,7 @@ export class World {
     })
 
     const receiptJwt = await this.receipts.issue({
-      paymentRequestToken: input.paymentRequestToken,
+      paymentRequestToken: input.paymentRequest,
       paymentOptionId: opt.id,
       payerDid: this.ids.parties.agent.did,
       txId: tx.txId,
@@ -265,7 +292,7 @@ export class World {
       agentPurpose: input.purpose,
     }
     try {
-      const { paymentRequest, parsed } = await verifyPaymentRequestToken(input.paymentRequestToken as JwtString, {
+      const { paymentRequest, parsed } = await verifyPaymentRequestToken(input.paymentRequest as JwtString, {
         resolver: this.ids.resolver,
       })
       facts.requestSignature = {
@@ -295,12 +322,64 @@ export class World {
       expectedAgentDid: this.policy.agentDid,
     })
     facts.identity = this.identityCheck
-    const seen = this.seen402.get(input.paymentRequestToken)
+    const seen = this.seen402.get(input.paymentRequest)
     facts.provenance = seen
       ? { ok: true, ...seen }
       : { ok: false, detail: "token was not returned by any 402 response the agent received in this task (e.g. pasted from page content)" }
     return facts
   }
+}
+
+const TOKEN_RE = /eyJ[\w-]+\.[\w-]+\.[\w-]+/g
+
+/** Decode (without verifying) a JWT that looks like an ACK payment request, only to label it for the agent. */
+function peekPaymentRequest(token: string): { description?: string; options: { id: string; amount: string | number; decimals: number; currency: string; recipient: string }[] } | undefined {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"))
+    if (Array.isArray(payload?.paymentOptions)) return { description: payload.description, options: payload.paymentOptions }
+  } catch {
+    /* not a payment request */
+  }
+  return undefined
+}
+
+function labelFor(token: string, world: World): string {
+  const pr = peekPaymentRequest(token)
+  if (!pr) return token
+  const o = pr.options[0]
+  const amt = o ? formatAmount(BigInt(o.amount), o.decimals, o.currency) : "?"
+  return `[ACK payment request ${world.refFor(token)}: "${pr.description ?? ""}", ${amt} to ${o?.recipient ?? "?"}]`
+}
+
+/**
+ * Render an HTTP response for the agent. Every ACK payment request token, in a
+ * 402 or anywhere in page content, is replaced with a short reference (pr_N),
+ * so the model never has to copy a long JWT. This is identical for both agents.
+ */
+export function renderHttpForAgent(r: { status: number; url: string; body: unknown }, world: World) {
+  const swapTokens = (text: string) => text.replace(TOKEN_RE, (t) => labelFor(t, world))
+  if (r.status === 402 && r.body && typeof r.body === "object") {
+    const { paymentRequest, paymentRequestToken, ...rest } = r.body as {
+      paymentRequestToken?: string
+      paymentRequest?: { description?: string; paymentOptions?: { id: string; amount: string | number; decimals: number; currency: string; recipient: string }[] }
+    }
+    const extra = JSON.parse(swapTokens(JSON.stringify(rest))) as Record<string, unknown>
+    return {
+      status: 402,
+      url: r.url,
+      ...extra,
+      payment_request: paymentRequestToken ? world.refFor(paymentRequestToken) : undefined,
+      description: paymentRequest?.description,
+      payment_options: (paymentRequest?.paymentOptions ?? []).map((o) => ({
+        id: o.id,
+        amount: formatAmount(BigInt(o.amount), o.decimals, o.currency),
+        recipient: o.recipient,
+      })),
+    }
+  }
+  const raw = typeof r.body === "string" ? r.body : JSON.stringify(r.body)
+  const body = swapTokens(raw)
+  return { status: r.status, url: r.url, body: body.length > 6000 ? body.slice(0, 6000) + "...[truncated]" : body }
 }
 
 function factsForLog(f: PaymentFacts) {

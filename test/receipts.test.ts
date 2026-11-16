@@ -111,7 +111,7 @@ describe("merchant 402 flow end to end", () => {
     const r1 = await w.httpGet("http://skycast.test/forecast?city=Boston")
     expect(r1.status).toBe(402)
     const token = (r1.body as { paymentRequestToken: string }).paymentRequestToken
-    const paid = await w.pay({ paymentRequestToken: token, paymentOptionId: "standard", purpose: "forecast" })
+    const paid = await w.pay({ paymentRequest: token, paymentOptionId: "standard", purpose: "forecast" })
     expect(paid.status).toBe("paid")
     const r2 = await w.httpGet("http://skycast.test/forecast?city=Boston")
     expect(r2.status).toBe(200)
