@@ -8,3 +8,4 @@ node_modules/
 coverage/
 results/**/tmp/
 .playwright-mcp/
+docs/demo.mp4
