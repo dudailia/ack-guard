@@ -15,6 +15,7 @@ import { ollamaAvailable, prepareModel, resolveModel, type ResolvedModel } from 
 import { runEpisode } from "../agent/run-episode.js"
 import { startDashboard, type PendingApproval } from "../dashboard/server.js"
 import { buildPolicyConfig } from "../policy/config.js"
+import { SpendStore } from "../policy/spend-store.js"
 import { approvalDemo } from "../redteam/demo-scenarios.js"
 import { ALL_SCENARIOS } from "../redteam/index.js"
 import { makeBuildCtx } from "../redteam/types.js"
@@ -41,6 +42,9 @@ else {
 await writeGenesis(audit, ids, buildPolicyConfig(ids), { model: model.id, purpose: "live demo log" })
 
 const scenarios = [...ALL_SCENARIOS, approvalDemo]
+// One spend history for the agent across every live episode and restart, so the
+// rolling daily cap is real. Delete .data/spend-history.json to reset it.
+const spend = new SpendStore(join(process.cwd(), ".data", "spend-history.json"))
 const approvals = new Map<string, PendingApproval>()
 let approvalCounter = 0
 const dashboardApprover =
@@ -82,6 +86,9 @@ async function run(scenarioId: string, mode: Mode) {
     seed: episodeCounter,
     meta: { scenarioId, category: scenario.category, live: true },
     approver: dashboardApprover(episodeId),
+    // Scenarios that simulate earlier spend (SE-04) get their own history so
+    // the simulated spend never lands in the agent's real one.
+    spend: setup.priorSpend?.length ? undefined : spend,
   }).then((r) => {
     const paid = r.payResults.filter((p) => p.result.status === "paid").length
     const stopped = r.payResults.filter((p) => p.result.status !== "paid").map((p) => p.rule ?? p.result.status)

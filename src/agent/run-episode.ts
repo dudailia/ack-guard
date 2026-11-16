@@ -7,6 +7,7 @@ import { z } from "zod"
 import type { AuditLog } from "../audit/chain.js"
 import type { Identities } from "../identity/identities.js"
 import type { Transfer } from "../ledger/sandbox-ledger.js"
+import type { SpendStore } from "../policy/spend-store.js"
 import { World, type Approver, type Mode, type PayResult, type WorldSetup } from "../world.js"
 import type { ResolvedModel } from "./model.js"
 import { SYSTEM_PROMPT, taskPrompt } from "./prompts.js"
@@ -36,9 +37,11 @@ export async function runEpisode(opts: {
   meta?: Record<string, unknown>
   approver?: Approver
   timeoutMs?: number
+  /** Share one spend store across episodes so the daily cap is per agent (live demo). */
+  spend?: SpendStore
 }): Promise<EpisodeResult> {
   const t0 = Date.now()
-  const world = new World(opts.ids, opts.setup, opts.mode, opts.audit, opts.episodeId, opts.approver)
+  const world = new World(opts.ids, opts.setup, opts.mode, opts.audit, opts.episodeId, opts.approver, opts.spend)
   const task = opts.setup.task
   await opts.audit.append("task", {
     episodeId: opts.episodeId,
