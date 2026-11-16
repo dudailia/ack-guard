@@ -189,16 +189,25 @@ function renderResults() {
   if (!data.results?.length) return
   $("#results").hidden = false
   $("#results-meta").textContent =
-    "From the project's recorded benchmark (results/ in the repository), verified against its signed logs by pnpm report. Same model, prompts and attacks with and without the guard."
+    "From the project's recorded benchmark (results/ in the repository), verified against its signed logs by pnpm report. Same model, prompts and attacks with and without the guard; success is judged on the sandbox ledger."
+  const suites = {
+    main: { title: "Main suite: 35 attacks, 10 benign tasks", goal: "of attack runs where the attack reached its goal", unit: "Successful attacks", benign: "Benign tasks completed" },
+    delegation: { title: "Delegation suite: 5 sub-agent escalation attacks, 2 benign hand-offs", goal: "of attack runs where the sub-agent exceeded its delegation", unit: "Runs that exceeded the delegation", benign: "Benign hand-offs completed" },
+  }
   $("#models").innerHTML = data.results
-    .map(({ summary: s, meta }) => {
+    .map(({ summary: s, meta, suite }) => {
+      const t = suites[suite || "main"] || suites.main
+      const held = (mode) => {
+        const b = s.benign[mode]
+        return b.escalations ? `<p class="caption">The other ${b.escalations} waited for human approval by design (payments above $1.00 go to a human; the benchmark's approver declines).</p>` : ""
+      }
       const side = (mode, title) => `
         <div class="side ${mode}"><h3>${title}</h3><p class="big">${pct(s.attacks[mode].rate)}</p>
-          <p class="caption">of attack runs where the attack reached its goal</p>
-          <dl><div><dt>Successful attacks</dt><dd>${s.attacks[mode].successes} of ${s.attacks[mode].n}</dd></div>
+          <p class="caption">${t.goal}</p>
+          <dl><div><dt>${t.unit}</dt><dd>${s.attacks[mode].successes} of ${s.attacks[mode].n}</dd></div>
           <div><dt>Money moved to attackers</dt><dd>${money(s.attacks[mode].attackerReceivedCents)}</dd></div>
-          <div><dt>Benign tasks completed</dt><dd>${s.benign[mode].completed} of ${s.benign[mode].n}</dd></div></dl></div>`
-      return `<div><h3>${esc(meta.modelLabel || s.model)}</h3><p class="muted">${s.episodes} episodes, ${meta.runs} runs per scenario${meta.patches?.length ? `, with re-runs of ${esc(meta.patches.map((p) => p.scenarios.join(", ")).join("; "))}` : ""}.</p>
+          <div><dt>${t.benign}</dt><dd>${s.benign[mode].completed} of ${s.benign[mode].n}</dd></div></dl>${held(mode)}</div>`
+      return `<div><h3>${esc(t.title)}</h3><p class="muted">Model: ${esc(String(meta.modelLabel || s.model).replace(/^(\S+) \(local Ollama, /, "$1 running locally (Ollama, "))}. ${s.episodes} episodes, ${meta.runs} runs per scenario${meta.patches?.length ? `, with re-runs of ${esc(meta.patches.map((p) => p.scenarios.join(", ")).join("; "))}` : ""}.</p>
         <div class="duel">${side("naive", "Without guard")}${side("guarded", "With ACK Guard")}</div></div>`
     })
     .join("")
