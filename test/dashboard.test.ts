@@ -84,4 +84,53 @@ describe("dashboard API", () => {
     expect((await post('{"approved":false}')).status).toBe(200)
     expect(got).toEqual([false])
   })
+
+  it("policy page: diff a proposed change against a signed log, approve only what was diffed", async () => {
+    const { loadPolicyFile, parsePolicy } = await import("../src/policy/policy-file.js")
+    const { ids, log, root } = await setup()
+    // A real guarded decision to replay.
+    const { resolveModel } = await import("../src/agent/model.js")
+    const { runEpisode } = await import("../src/agent/run-episode.js")
+    const { ALL_SCENARIOS } = await import("../src/redteam/index.js")
+    const { makeBuildCtx } = await import("../src/redteam/types.js")
+    const b05 = await ALL_SCENARIOS.find((x) => x.id === "B-05")!.build(makeBuildCtx(ids))
+    await runEpisode({ ids, setup: b05, mode: "guarded", audit: log, episodeId: "B-05/guarded/r1", model: resolveModel("scripted"), meta: { scenarioId: "B-05" } })
+    let active = { policy: loadPolicyFile(), source: "repository" as const }
+    const approved: string[] = []
+    const app = createDashboard({
+      liveLog: log,
+      root,
+      port: 4300,
+      operatorGuardDid: ids.parties.guard.did,
+      policy: {
+        active: () => active as never,
+        history: () => [],
+        approve: async (p) => {
+          approved.push(p.hash)
+          active = { policy: p, source: "repository" }
+          return { version: p.version, seq: 1 }
+        },
+      },
+    })
+    const page = await (await app.request(`${BASE}/policy`)).text()
+    expect(page).toContain("How each payment is checked")
+    const cur = await (await app.request(`${BASE}/api/policy`)).json()
+    expect(cur.doc.rules.length).toBe(12)
+    const post = (path: string, body: unknown) => app.request(`${BASE}${path}`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify(body) })
+
+    expect((await post("/api/policy/approve", { id: "pd_nope" })).status).toBe(400)
+    expect((await post("/api/policy/diff", { yaml: "rules: [" })).status).toBe(400)
+    const proposedText = cur.text.replace('approval_threshold: "1.00"', 'approval_threshold: "0.40"')
+    const d = await (await post("/api/policy/diff", { yaml: proposedText })).json()
+    expect(d.logVerified).toBe(true)
+    expect(d.counts["now escalated"]).toBe(2)
+    expect(d.policyChanges).toEqual(["Payments need a human above: $1.00 -> $0.40"])
+    const ok = await (await post("/api/policy/approve", { id: d.id })).json()
+    expect(ok.ok).toBe(true)
+    expect(approved).toEqual([parsePolicy(proposedText).hash])
+    // The same diff cannot be approved twice, and a cross-site approval is refused.
+    expect((await post("/api/policy/approve", { id: d.id })).status).toBe(400)
+    const evil = await app.request(`${BASE}/api/policy/approve`, { method: "POST", headers: { origin: "https://evil.example", "content-type": "application/json" }, body: JSON.stringify({ id: d.id }) })
+    expect(evil.status).toBe(403)
+  })
 })

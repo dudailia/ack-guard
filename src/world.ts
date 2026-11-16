@@ -35,6 +35,8 @@ export interface WorldSetup {
   behaviors?: Partial<Record<MerchantKey, MerchantBehavior>>
   /** Prior spend today (for daily-cap scenarios). */
   priorSpend?: { amount: bigint; hoursAgo: number }[]
+  /** The policy in force; the repository policy.yaml when absent. */
+  policy?: PolicyConfig
 }
 
 export type Approver = (ctx: { decision: Decision; facts: PaymentFacts; task: TaskSpec }) => Promise<{ approved: boolean; by: string }>
@@ -87,7 +89,7 @@ export class World {
     readonly spend: SpendStore = new SpendStore(),
   ) {
     this.receipts = new ReceiptService(ids.parties.receipts, this.ledger, ids.resolver)
-    this.policy = buildPolicyConfig(ids)
+    this.policy = setup.policy ?? buildPolicyConfig(ids)
     this.ledger.fund(ids.parties.agent.did, AGENT_STARTING_BALANCE)
     const now = Date.now()
     for (const p of setup.priorSpend ?? []) {
@@ -242,7 +244,13 @@ export class World {
     let decision: Decision | undefined
     if (this.mode === "guarded") {
       decision = evaluatePayment(facts, this.task, this.policy, this.history, Date.now())
-      await this.audit.append("decision", { ...base, decision, facts: factsForLog(facts), ...(approval ? { afterApproval: true } : {}) })
+      await this.audit.append("decision", {
+        ...base,
+        decision,
+        facts: factsForLog(facts),
+        policyVersion: this.policy.policyVersion,
+        ...(approval ? { afterApproval: true } : {}),
+      })
       if (decision.outcome === "needs_approval") return { kind: "needs_approval", decision, facts }
       if (decision.outcome === "deny") {
         const result: PayResult = {

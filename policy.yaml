@@ -1,0 +1,102 @@
+# ACK Guard payment policy.
+#
+# This file is the guard's whole configuration: which merchants the agent may
+# pay, what each one sells and at what price, the spending limits, and the
+# rules. The guard checks every payment against it, in the order the rules
+# are listed, and the first rule that fails decides. Nothing an agent reads or
+# says can change it.
+#
+# Merchants are named by key. Their identity (DID) and payout account come from
+# the operator's key registry, so the file never holds keys or account numbers.
+#
+# To change the policy safely: write the proposed file, run
+#   pnpm policy-diff <proposed.yaml>
+# to see which past payments would now be allowed, blocked or held for a human,
+# then approve it (pnpm policy-approve, or the dashboard's Policy page). An
+# approval is signed by the owner and written to a signed policy log, and the
+# live demo only runs a policy that log approved.
+
+name: Research agent payment policy
+version: 1
+currency: USD
+decimals: 2
+
+limits:
+  per_payment_cap: "5.00"
+  approval_threshold: "1.00"
+  daily_cap: "20.00"
+  duplicate_window_hours: 24
+
+merchants:
+  - key: skycast
+    name: SkyCast Weather
+    hosts: [skycast.test]
+    sells:
+      - { path: /forecast, capability: weather.forecast, price: "0.25", description: Next-day forecast for a city }
+      - { path: /alerts, capability: weather.alerts, price: "0.10", description: Active weather alerts for a city }
+      - { path: /history, capability: weather.history, price: "1.50", description: 30-day historical weather for a city }
+  - key: lingua
+    name: LinguaBridge Translate
+    hosts: [linguabridge.test]
+    sells:
+      - { path: /translate, capability: translation, price: "0.50", description: Translate a text snippet }
+  - key: geopoint
+    name: GeoPoint Lookup
+    hosts: [geopoint.test]
+    sells:
+      - { path: /geocode, capability: geocoding, price: "0.05", description: Latitude and longitude for an address }
+      - { path: /route, capability: routing, price: "0.75", description: Driving route between two places }
+
+# The rules, in the order the guard checks them. The order is fixed by the
+# guard; this file can switch a rule off (except the first two, which check
+# that a payment and its payer are genuine) or send its failures to a human
+# instead of refusing them.
+rules:
+  - id: REQ_SIGNATURE
+    title: Payment request is a validly signed ACK-Pay token
+    plain: The bill must carry the merchant's digital signature, so nobody can alter it or make one up.
+    on_fail: deny
+  - id: AGENT_IDENTITY
+    title: Agent holds a valid ACK-ID ControllerCredential from its owner
+    plain: The agent paying must prove, with a credential the owner signed, that it acts for this owner.
+    on_fail: deny
+  - id: REQ_PROVENANCE
+    title: Payment request came from a 402 response to a URL the agent called
+    plain: A bill only counts if the agent asked a service for something and the service answered with it. A bill found in an email or on a web page is refused.
+    on_fail: deny
+  - id: MERCHANT_ALLOWLIST
+    title: Signer DID is an allowlisted merchant serving from its own host
+    plain: Only the merchants listed above can be paid, identified by their cryptographic identity, not by the name they show.
+    on_fail: deny
+  - id: RECIPIENT_BINDING
+    title: Recipient is the merchant's registered payout account
+    plain: Money can only go to the merchant's registered account, even if the merchant's own server asks for a different one.
+    on_fail: deny
+  - id: PRICE_BINDING
+    title: Amount and currency match the registered price for the endpoint
+    plain: The price must be exactly the listed price for what is being bought.
+    on_fail: deny
+  - id: PURPOSE_BINDING
+    title: Endpoint capability is one the task declared it needs
+    plain: The agent can only buy the kinds of things the owner said the task needs.
+    on_fail: deny
+  - id: DUPLICATE_CHARGE
+    title: "Not a repeat purchase: same request, or more of a capability from one merchant than the task asked for"
+    plain: The same bill is never paid twice, and the agent cannot buy something again under a different web address. A task that needs something twice says so.
+    on_fail: deny
+  - id: PER_PAYMENT_CAP
+    title: Amount is within the per-payment cap
+    plain: No single payment can be larger than the per-payment cap.
+    on_fail: deny
+  - id: TASK_BUDGET
+    title: Cumulative task spend stays within the task budget
+    plain: All payments for one task together stay within that task's budget.
+    on_fail: deny
+  - id: DAILY_CAP
+    title: Rolling 24h spend stays within the daily cap
+    plain: All of the agent's payments in any 24 hours together stay within the daily cap.
+    on_fail: deny
+  - id: HUMAN_APPROVAL
+    title: Payments above the approval threshold need a human
+    plain: Payments above the approval threshold wait for the owner to approve them. An approval never overrides a refusal by another rule.
+    on_fail: escalate

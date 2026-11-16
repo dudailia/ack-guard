@@ -2,6 +2,9 @@
 // SSE from the demo log, or any recorded run), replay view, tamper demo, and a
 // human-approval queue for live guarded runs. Binds to 127.0.0.1 only.
 
+import type { ActivePolicy } from "../policy/approvals.js"
+import { policyDiff, type PolicyDiffReport } from "../policy/diff.js"
+import { parsePolicy, type LoadedPolicy } from "../policy/policy-file.js"
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
@@ -43,6 +46,12 @@ export interface DashboardOptions {
   root?: string
   /** This machine's guard DID. Logs it signed are verified as pinned; other logs as "not pinned". */
   operatorGuardDid?: string
+  /** Policy page: the active policy, its history, and approving a diffed change. */
+  policy?: {
+    active: () => ActivePolicy
+    history: () => unknown[]
+    approve: (proposed: LoadedPolicy, diff: PolicyDiffReport) => Promise<{ version: string; seq: number }>
+  }
 }
 
 export function createDashboard(opts: DashboardOptions) {
@@ -74,7 +83,7 @@ export function createDashboard(opts: DashboardOptions) {
   }
   const rel = (p: string) => relative(root, p)
 
-  for (const f of ["app.js", "styles.css"]) {
+  for (const f of ["app.js", "styles.css", "policy.js"]) {
     app.get(`/${f}`, (c) =>
       c.body(readFileSync(join(PUBLIC, f), "utf8"), 200, {
         "content-type": f.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8",
@@ -82,6 +91,52 @@ export function createDashboard(opts: DashboardOptions) {
     )
   }
   app.get("/", (c) => c.html(readFileSync(join(PUBLIC, "index.html"), "utf8")))
+  app.get("/policy", (c) => c.html(readFileSync(join(PUBLIC, "policy.html"), "utf8")))
+
+  // ---------- policy ----------
+  const proposals = new Map<string, { proposed: LoadedPolicy; diff: PolicyDiffReport }>()
+  app.get("/api/policy", (c) => {
+    if (!opts.policy) return c.json({ error: "no policy configured" }, 404)
+    const a = opts.policy.active()
+    return c.json({ source: a.source, approvedAt: a.approvedAt, version: a.policy.version, hash: a.policy.hash, doc: a.policy.doc, text: a.policy.text, history: opts.policy.history() })
+  })
+  app.post("/api/policy/diff", async (c) => {
+    if (!opts.policy) return c.json({ error: "no policy configured" }, 404)
+    const body = (await c.req.json()) as { yaml?: unknown; log?: unknown }
+    if (typeof body.yaml !== "string" || body.yaml.length > 200_000) return c.json({ error: "send the proposed policy as yaml text" }, 400)
+    let proposed: LoadedPolicy
+    try {
+      proposed = parsePolicy(body.yaml)
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+    const log = allowedLog(typeof body.log === "string" ? body.log : undefined)
+    if (!log) return c.json({ error: "unknown log" }, 404)
+    const trust = signerFor(log)
+    if (!trust.pinned || !trust.did) return c.json({ error: `this log is not signed by this machine's guard key (${trust.source})` }, 400)
+    try {
+      const diff = await policyDiff(log, opts.policy.active().policy, proposed, { expectedSignerDid: trust.did })
+      const id = `pd_${crypto.randomUUID()}`
+      proposals.set(id, { proposed, diff })
+      return c.json({ id, ...diff, log: rel(diff.log) })
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+  })
+  app.post("/api/policy/approve", async (c) => {
+    if (!opts.policy) return c.json({ error: "no policy configured" }, 404)
+    const { id } = (await c.req.json()) as { id?: unknown }
+    const p = typeof id === "string" ? proposals.get(id) : undefined
+    if (!p) return c.json({ error: "run the diff first; only a diffed change can be approved" }, 400)
+    if (p.diff.from.hash !== opts.policy.active().policy.hash) return c.json({ error: "the active policy changed since this diff; run it again" }, 409)
+    try {
+      const r = await opts.policy.approve(p.proposed, p.diff)
+      proposals.delete(id as string)
+      return c.json({ ok: true, ...r })
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+  })
 
   app.get("/api/runs", (c) => {
     const runs: { path: string; model: string; summary: unknown; meta: unknown; verification: unknown }[] = []
@@ -119,7 +174,16 @@ export function createDashboard(opts: DashboardOptions) {
 
   app.get("/api/logs", (c) => {
     const live = opts.liveLog ? rel(resolve(opts.liveLog.path)) : undefined
-    return c.json({ live, logs: findLogs(root).map(rel) })
+    const superseded = (p: string) => {
+      const m = join(dirname(p), "meta.json")
+      try {
+        return existsSync(m) && !!JSON.parse(readFileSync(m, "utf8")).superseded
+      } catch {
+        return false
+      }
+    }
+    const all = findLogs(root)
+    return c.json({ live, logs: all.map(rel), superseded: all.filter(superseded).map(rel), sizes: Object.fromEntries(all.map((p) => [rel(p), statSync(p).size])) })
   })
 
   app.get("/api/attempts", (c) => {

@@ -50,6 +50,11 @@ export async function runEpisode(opts: {
     seed: opts.seed,
     task: { ...task, budget: task.budget.toString() },
     systemPrompt: SYSTEM_PROMPT,
+    // What the policy needs to re-evaluate this episode from the log alone (policy diff).
+    policyVersion: world.policy.policyVersion,
+    spendAtStart: world.history.payments
+      .filter((p) => Date.now() - p.ts <= 48 * 3600 * 1000)
+      .map((p) => ({ ...p, amount: p.amount.toString() })),
     ...opts.meta,
   })
 

@@ -14,7 +14,8 @@ import { writeGenesis } from "../audit/genesis.js"
 import { ollamaAvailable, prepareModel, resolveModel, type ResolvedModel } from "../agent/model.js"
 import { runEpisode } from "../agent/run-episode.js"
 import { startDashboard, type PendingApproval } from "../dashboard/server.js"
-import { buildPolicyConfig } from "../policy/config.js"
+import { approvePolicyChange, loadActivePolicy, policyHistory, type ActivePolicy } from "../policy/approvals.js"
+import { configFor } from "../policy/config.js"
 import { SpendStore } from "../policy/spend-store.js"
 import { approvalDemo } from "../redteam/demo-scenarios.js"
 import { ALL_SCENARIOS } from "../redteam/index.js"
@@ -39,7 +40,17 @@ else {
   console.log(c.yellow("Ollama with qwen3:8b was not found, so the live demo uses the deterministic scripted agent (not an LLM)."))
   console.log(c.yellow("For a real model: install Ollama, run `ollama pull qwen3:8b`, then `pnpm demo` again.\n"))
 }
-await writeGenesis(audit, ids, buildPolicyConfig(ids), { model: model.id, purpose: "live demo log" })
+// The live guard runs the active policy: policy.yaml, or the last change the
+// owner approved in the signed policy log. It refuses to start on anything else.
+let active: ActivePolicy
+try {
+  active = await loadActivePolicy(ids)
+} catch (e) {
+  console.error(c.red(`Refusing to start: ${(e as Error).message}`))
+  process.exit(1)
+}
+let policy = configFor(ids, active.policy)
+await writeGenesis(audit, ids, policy, { model: model.id, purpose: "live demo log", policyVersion: active.policy.version, policySource: active.source })
 
 const scenarios = [...ALL_SCENARIOS, approvalDemo]
 // One spend history for the agent across every live episode and restart, so the
@@ -81,7 +92,7 @@ async function run(scenarioId: string, mode: Mode) {
   const built = await scenario.build(ctx)
   // Each live episode is its own task instance, so running the same scenario
   // twice is two tasks (not a duplicate charge within one task).
-  const setup = { ...built, task: { ...built.task, id: taskInstanceId(built.task.id, sessionId, episodeCounter) } }
+  const setup = { ...built, policy, task: { ...built.task, id: taskInstanceId(built.task.id, sessionId, episodeCounter) } }
   const done = runEpisode({
     ids,
     setup,
@@ -112,6 +123,19 @@ const { url } = startDashboard({
   liveInfo: () => ({ model: model.label }),
   operatorGuardDid: ids.parties.guard.did,
   runScenario: (scenarioId, mode) => run(scenarioId, mode),
+  policy: {
+    active: () => active,
+    history: () => policyHistory(),
+    approve: async (proposed, diff) => {
+      const { entry } = await approvePolicyChange({ ids, current: active.policy, proposed, diff, note: "approved in the dashboard" })
+      active = await loadActivePolicy(ids)
+      policy = configFor(ids, active.policy)
+      // Record the switch in this session's log too, so later decisions are read against the right policy.
+      await audit.append("policy_change", { from: diff.from, to: diff.to, policyLog: ".data/policy/audit.jsonl", policyLogSeq: entry.seq })
+      console.log(c.bold(`Policy ${diff.to.version} approved by the owner and active (policy log entry ${entry.seq}).`))
+      return { version: active.policy.version, seq: entry.seq }
+    },
+  },
 })
 
 console.log(c.bold("\nACK Guard demo"))

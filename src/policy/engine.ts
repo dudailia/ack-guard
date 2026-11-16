@@ -70,8 +70,12 @@ export function evaluatePayment(
   now: number,
 ): Decision {
   const checks: RuleResult[] = []
-  const add = (id: RuleId, passed: boolean | null, detail: string, onFail: "deny" | "needs_approval" = "deny") =>
-    checks.push({ id, title: RULE_TITLES[id], passed, onFail, detail })
+  const add = (id: RuleId, passed: boolean | null, detail: string, onFail: "deny" | "needs_approval" = "deny") => {
+    const set = config.rules?.[id]
+    const r: RuleResult = { id, title: RULE_TITLES[id], passed, onFail: set?.onFail ?? onFail, detail }
+    if (set && !set.enabled) r.disabled = true
+    checks.push(r)
+  }
 
   const opt = facts.option
   const amount = opt?.amount
@@ -241,13 +245,19 @@ export function evaluatePayment(
 
   // Decide: first failing rule wins. A rule that could not be evaluated (null)
   // counts as a failure only if no earlier rule failed (fail closed).
-  const firstFail = checks.find((c) => c.passed !== true)
+  const firstFail = checks.find((c) => c.passed !== true && !c.disabled)
   const base = { checks, merchant: merchant?.displayName, endpoint: endpoint?.path, amount: amount?.toString() }
   if (!firstFail) {
     return {
       ...base,
       outcome: "allow",
-      rule: { id: "ALL_RULES_PASSED", title: "All rules passed", detail: `${checks.length} of ${checks.length} rules passed` },
+      rule: {
+        id: "ALL_RULES_PASSED",
+        title: "All rules passed",
+        detail: checks.some((c) => c.disabled)
+          ? `${checks.filter((c) => !c.disabled).length} of ${checks.filter((c) => !c.disabled).length} enabled rules passed (${checks.filter((c) => c.disabled).map((c) => c.id).join(", ")} switched off by the policy)`
+          : `${checks.length} of ${checks.length} rules passed`,
+      },
     }
   }
   return {

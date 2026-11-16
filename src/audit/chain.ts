@@ -27,6 +27,7 @@ export type EntryKind =
   | "receipt"
   | "payment_error"
   | "episode_end"
+  | "policy_change"
 
 export interface AuditEntry {
   seq: number

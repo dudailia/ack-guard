@@ -21,7 +21,10 @@
     "check": "pnpm typecheck && pnpm test && pnpm check:em-dash && pnpm check:secrets",
     "spike": "tsx scripts/spike.ts",
     "record-demo": "tsx scripts/record-demo.ts",
-    "build:site": "tsx scripts/build-site.ts site"
+    "build:site": "tsx scripts/build-site.ts site",
+    "policy-diff": "tsx src/cli/policy.ts diff",
+    "policy-approve": "tsx src/cli/policy.ts approve",
+    "policy-show": "tsx src/cli/policy.ts show"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.105",
@@ -31,6 +34,7 @@
     "ai": "^7.0.173",
     "hono": "^4.13.18",
     "valibot": "1.4.1",
+    "yaml": "2.8.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

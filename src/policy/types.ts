@@ -22,6 +22,8 @@ export interface RuleResult {
   /** What happens when this rule fails. */
   onFail: Exclude<Outcome, "allow">
   detail: string
+  /** Switched off by the policy: recorded, but it cannot decide the outcome. */
+  disabled?: boolean
 }
 
 export interface Decision {
@@ -62,6 +64,11 @@ export interface PolicyConfig {
     dailyCap: bigint
     duplicateWindowMs: number
   }
+  /** Per-rule settings from policy.yaml. Absent means every rule on, with its default outcome. */
+  rules?: Partial<Record<RuleId, { enabled: boolean; onFail: Exclude<Outcome, "allow"> }>>
+  /** Which policy document this config came from (policy.yaml version and hash). */
+  policyVersion?: string
+  policyHash?: string
 }
 
 /** Set by the task author (the human), never by the LLM. */
