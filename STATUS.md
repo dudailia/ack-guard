@@ -1,6 +1,6 @@
 # STATUS
 
-Last updated: 2026-11-16, early morning. Overnight hardening plan: steps 1 to 7 done, final review in progress (see below).
+Last updated: 2026-11-16, early morning. Overnight hardening plan: steps 1 to 7 done.
 
 ## Final numbers (qwen3:8b, 5 runs, 450 episodes, `results/qwen3-8b/final-20261116/`, code at 5885950)
 
@@ -20,10 +20,17 @@ Last updated: 2026-11-16, early morning. Overnight hardening plan: steps 1 to 7 
 
 ## Done (committed locally, nothing pushed)
 - M0 to M7, review rounds 1 to 3 with regression tests, property tests and the audit fuzzer
-- Final benchmark (2fda3cd), docs from the final run (6ab1936), demo media (9d4a6cd)
+- Final benchmark (2fda3cd), docs from the final run (6ab1936), demo media (9d4a6cd), final review fixes (6b11679)
 - `docs/demo.mp4` (64 s, gitignored), `docs/demo.gif` and `docs/dashboard.png` (committed), all recorded with qwen3
-- Code changed after 5885950 affects the live demo only: unique task ids across demo restarts, scoreboard labels. It does not touch the benchmark path.
-- Full check: 79 tests, typecheck, em-dash check and secret scan pass. A fresh clone runs `pnpm install && pnpm check`, and the demo, replay and verify-log all work from it.
+- Final independent review (after the benchmark) confirmed 7 issues; all fixed in 6b11679 with regression tests:
+  - `pnpm report` could be fooled by rows swapped between episodes (it now binds scenario, agent, run, seed and error status to the signed log, one row per episode)
+  - spend went uncounted if the settlement log write failed
+  - two demo processes sharing `.data` could each spend the full daily cap
+  - the string "false" approved a dashboard approval
+  - verification could fetch a `did:web` named by a forged log (DID resolution is now network-free)
+  - docs: a revocation claim (removed), key custody (added to limits), "the model was fooled in 80 runs" (20 of those were compromised merchants), the receipt listed as a policy input
+- Code changed after 5885950 touches the benchmark path only when an audit log write fails, which never happened in the recorded run (0 errors). The README says so. Everything else is demo, dashboard, verification or docs.
+- Full check at 6b11679: 84 tests, typecheck, em-dash check and secret scan pass in a fresh clone. From that clone, `pnpm demo` (qwen3) passes all three steps: a paid legit purchase, the injected invoice blocked by REQ_PROVENANCE, and the tamper detected at entry 15. Replay and verify-log (anchored to the final head hash) also pass.
 
 ## Needs you
 - **Claude runs** need `ANTHROPIC_API_KEY` in `.env` (gitignored). Then run `pnpm redteam --model claude-sonnet-5-5 --runs 5` and `pnpm report`.
