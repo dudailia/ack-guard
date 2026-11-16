@@ -1,4 +1,4 @@
-# Interview practice: 20 questions about ACK Guard
+# Interview practice: 21 questions about ACK Guard
 
 These are the questions a Catena engineer is likely to ask, with model answers. Cover the answer, say yours out loud, then compare. The numbers come from `results/` and the README; re-read them before the interview.
 
@@ -42,6 +42,9 @@ I built the policy engine, the sandbox (merchants, ledger, receipt service), the
 `REQ_PROVENANCE`. In ACK-Pay a legitimate quote exists because you asked a service for something and it answered 402. A payment request that shows up in an email, a web page or a JSON field is not a quote for anything you asked for. The guard sits in the HTTP client, so it knows which tokens came from 402s and from which URL. That one rule stops every fake invoice without understanding any text.
 
 **6. An attacker controls a real merchant's server. What still protects the owner?**
+
+(Related: the sandbox merchants also bind each ACK receipt to the endpoint and URL it was quoted for, and accept it once, so a cheap receipt cannot unlock an expensive endpoint.)
+
 
 The attacker can sign valid requests with the merchant's key, so signature and allowlist checks pass. But:
 - `RECIPIENT_BINDING` rejects a changed payout account.
@@ -124,7 +127,7 @@ I also mutation-checked the properties: breaking `RECIPIENT_BINDING` or `TASK_BU
 
 **16. How do you handle concurrency?**
 
-The AI SDK can run several tool calls from one model step concurrently. Without care, two payments would be evaluated against the same empty history and both pass. All payment decisions for an agent go through one lock in a shared spend store. A property test fires random batches of concurrent payments and checks the ledger never exceeds the budget or cap. An independent review found this race; I fixed it and checked that it did not change any recorded decision.
+The AI SDK can run several tool calls from one model step concurrently. Without care, two payments would be evaluated against the same empty history and both pass. All payment decisions for an agent go through one lock in a shared spend store. A property test fires random batches of concurrent payments and checks the ledger never exceeds the budget or cap. An independent review found this race. I fixed it and replayed the affected episodes of the earlier run one payment at a time; every decision came out the same. Human approvals are awaited outside the lock, so one pending approval never stalls other payments.
 
 **17. How would this map to a trust bank?**
 
@@ -153,7 +156,14 @@ The ACK receipt ties each ledger entry to a specific signed quote and a specific
 
 Each would have biased the results, and each is documented.
 
-**20. What would make you distrust these results?**
+**20. How do I know the numbers in the README are real?**
+
+- **Re-derived from the signed log.** `pnpm report` doesn't trust the summary files. It re-derives every scored row from the audit log's signed entries: the transfers, the decisions and the merchant service records. It checks that the log's run id and final head hash match the run's metadata, and refuses to publish if anything disagrees.
+- **One code version per run.** The run records its git commit and refuses to resume on different code.
+- **Fixes were checked against recorded results.** Three independent reviews ran during the build. Each confirmed finding got a fix and a regression test. One of them was a race that could have changed results, and I replayed the affected episodes to show it did not.
+- **The limit:** the guard DID and head hash also live in the repository, so for full assurance they need to be published somewhere else as well.
+
+**21. What would make you distrust these results?**
 
 - One small local model with thinking off.
 - Attacks I wrote myself, so they reflect my imagination of the threat.
