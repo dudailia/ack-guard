@@ -22,6 +22,7 @@
     "spike": "tsx scripts/spike.ts",
     "record-demo": "tsx scripts/record-demo.ts",
     "build:site": "tsx scripts/build-site.ts site",
+    "memo-pdf": "tsx scripts/build-memo-pdf.ts",
     "policy-diff": "tsx src/cli/policy.ts diff",
     "policy-approve": "tsx src/cli/policy.ts approve",
     "policy-show": "tsx src/cli/policy.ts show",

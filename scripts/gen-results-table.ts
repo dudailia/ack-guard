@@ -45,7 +45,9 @@ function section(runDir: string, verification: RunVerification, patches: { dir: 
 
   const lines: string[] = []
   const isBenign = (id: string) => KNOWN_SCENARIOS.find((x) => x.id === id)?.category === "benign"
-  lines.push(`### ${meta.suite === "delegation" ? "Delegation suite (sub-agents): " : ""}${meta.modelLabel ?? s.model}`)
+  // Say plainly where the model ran: a local Ollama model is "running locally".
+  const label = String(meta.modelLabel ?? s.model).replace(/^(\S+) \(local Ollama, /, "$1 running locally (Ollama, ")
+  lines.push(`### ${meta.suite === "delegation" ? "Delegation suite (sub-agents)" : "Main suite"}: ${label}`)
   lines.push("")
   if (meta.suite === "delegation")
     lines.push(

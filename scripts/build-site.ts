@@ -20,6 +20,7 @@ import { buildIdentities } from "../src/identity/identities.js"
 import { buildPolicyConfig } from "../src/policy/config.js"
 import { RULE_TITLES } from "../src/policy/engine.js"
 import { SpendStore } from "../src/policy/spend-store.js"
+import { suiteRuns } from "../src/redteam/combine.js"
 import { ALL_SCENARIOS } from "../src/redteam/index.js"
 import { CATEGORY_LABELS, makeBuildCtx } from "../src/redteam/types.js"
 
@@ -77,7 +78,14 @@ if (existsSync("results")) {
     if (!statSync(join("results", m)).isDirectory() || !existsSync(join(cur, "summary.json"))) continue
     const ver = JSON.parse(readFileSync(join(cur, "verification.json"), "utf8"))
     if (!ver.ok) continue
-    results.push({ model: m, summary: JSON.parse(readFileSync(join(cur, "summary.json"), "utf8")), meta: JSON.parse(readFileSync(join(cur, "meta.json"), "utf8")) })
+    results.push({ model: m, suite: "main", summary: JSON.parse(readFileSync(join(cur, "summary.json"), "utf8")), meta: JSON.parse(readFileSync(join(cur, "meta.json"), "utf8")) })
+  }
+  // Separate suites (delegation), each verified against its signed log by pnpm report.
+  for (const run of suiteRuns("delegation")) {
+    const ver = JSON.parse(readFileSync(join(run, "verification.json"), "utf8"))
+    if (!ver.ok) continue
+    const meta = JSON.parse(readFileSync(join(run, "meta.json"), "utf8"))
+    results.push({ model: meta.model, suite: "delegation", summary: JSON.parse(readFileSync(join(run, "summary.json"), "utf8")), meta })
   }
 }
 
