@@ -103,7 +103,7 @@ execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", raw, "-c:v", "libx264"
 const gif = join(docs, "demo.gif")
 execFileSync("ffmpeg", [
   "-y", "-loglevel", "error", "-i", raw,
-  "-vf", "setpts=0.5*PTS,fps=8,scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
+  "-vf", "setpts=0.5*PTS,fps=6,scale=640:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
   gif,
 ])
 const dur = execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", mp4]).toString().trim()

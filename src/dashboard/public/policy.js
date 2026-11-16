@@ -49,6 +49,7 @@ function render(p) {
     : `<p class="muted">None yet. The live guard runs the repository's policy.yaml.</p>`
 }
 
+const changeWord = { "now allowed": "now allowed", "now blocked": "now refused", "now escalated": "now held for you", "different rule": "different reason" }
 const word = (o) => (o === "allow" ? "allowed" : o === "deny" ? "refused" : "held for you")
 
 async function diff() {
@@ -66,7 +67,7 @@ async function diff() {
   const rows = d.changes
     .slice(0, 60)
     .map(
-      (c) => `<tr class="${c.change.replace(" ", "-")}"><td>${esc(c.change)}</td><td>${esc(c.scenarioId || c.episodeId)}<br><span class="muted">${esc(c.attemptId)}</span></td>
+      (c) => `<tr class="${c.change.replace(" ", "-")}"><td>${esc(changeWord[c.change] || c.change)}</td><td>${esc(c.scenarioId || c.episodeId)}<br><span class="muted">${esc(c.attemptId)}</span></td>
         <td>${esc(c.merchant || "")} ${esc(c.endpoint || "")}</td><td>${esc(c.amount || "")}</td>
         <td>${esc(word(c.current.outcome))} <span class="muted">(${esc(c.current.rule)})</span></td><td>${esc(word(c.proposed.outcome))} <span class="muted">(${esc(c.proposed.rule)})</span>${c.afterEarlierChange ? `<br><span class="muted">after an earlier change in this run</span>` : ""}</td></tr>`,
     )
