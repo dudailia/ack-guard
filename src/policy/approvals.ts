@@ -29,8 +29,8 @@ export const policyLogPath = (dir = POLICY_DIR) => join(dir, "audit.jsonl")
 export const activePolicyPath = (dir = POLICY_DIR) => join(dir, "active.yaml")
 
 /** What an approval commits to about the diff the owner saw. */
-export function diffDigest(d: PolicyDiffReport): string {
-  const summary = {
+export function diffSummary(d: PolicyDiffReport) {
+  return {
     log: d.log,
     logHeadHash: d.logHeadHash,
     from: d.from.hash,
@@ -38,8 +38,11 @@ export function diffDigest(d: PolicyDiffReport): string {
     decisionsReplayed: d.decisionsReplayed,
     changes: d.changes.map((c) => [c.attemptId, c.current.outcome, c.current.rule, c.proposed.outcome, c.proposed.rule]),
   }
-  return createHash("sha256").update(canonicalJson(summary)).digest("hex")
 }
+export function diffDigest(d: PolicyDiffReport): string {
+  return digestOf(diffSummary(d))
+}
+const digestOf = (summary: unknown) => createHash("sha256").update(canonicalJson(summary)).digest("hex")
 
 export interface ApprovalClaims {
   type: "ack-guard-policy-approval"
@@ -63,6 +66,7 @@ export async function approvePolicyChange(opts: {
   const { ids, current, proposed, diff } = opts
   if (diff.from.hash !== current.hash || diff.to.hash !== proposed.hash) throw new Error("the diff shown was for a different policy change; run the diff again")
   if (!diff.logVerified) throw new Error("the diff was computed on a log that does not verify; refusing to approve")
+  if (diff.decisionsReplayed === 0) throw new Error("the diff replayed no past decisions; diff against a log with guarded payments before approving")
   const approver = opts.approver ?? ids.parties.owner
   const dir = opts.dir ?? POLICY_DIR
   // A change must build on the policy in force, never on a stale one.
@@ -78,7 +82,8 @@ export async function approvePolicyChange(opts: {
     to: diff.to,
     policyText: proposed.text,
     policyChanges: diff.policyChanges,
-    diff: { log: diff.log, logHeadHash: diff.logHeadHash, decisionsReplayed: diff.decisionsReplayed, counts: diff.counts, digest: claims.diff },
+    // The exact summary the owner's signature covers, so anyone can recompute the digest.
+    diff: { log: diff.log, logHeadHash: diff.logHeadHash, decisionsReplayed: diff.decisionsReplayed, counts: diff.counts, summary: diffSummary(diff), digest: claims.diff },
     approval: { by: approver.did, jwt },
     note: opts.note,
   })
@@ -118,7 +123,8 @@ export async function loadActivePolicy(ids: Identities, dir = POLICY_DIR): Promi
     const prevTo = (changes[i - 1]!.payload.to as { hash: string }).hash
     if ((changes[i]!.payload.from as { hash: string }).hash !== prevTo) throw new Error(`policy change ${changes[i]!.seq} does not continue from the change before it`)
   }
-  const p = last.payload as { from: { hash: string }; to: { hash: string }; diff: { digest: string }; approval: { by: string; jwt: string } }
+  const p = last.payload as { from: { hash: string }; to: { hash: string }; diff: { digest: string; summary?: unknown }; approval: { by: string; jwt: string } }
+  if (!p.diff.summary || digestOf(p.diff.summary) !== p.diff.digest) throw new Error("the policy log's diff summary does not match the digest the owner signed")
   if (policy.hash !== p.to.hash) throw new Error(`${active} is not the last approved policy (hash ${policy.hash.slice(0, 12)}, approved ${p.to.hash.slice(0, 12)})`)
   if (p.approval.by !== ids.parties.owner.did) throw new Error("the last policy change was not approved by the configured owner")
   const resolver = offlineDidResolver()

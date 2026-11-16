@@ -1,6 +1,6 @@
 {
   "format": "ack-guard-dispute-pack/1",
-  "generatedAt": "2026-11-16T15:59:23.709Z",
+  "generatedAt": "2026-11-16T16:16:52.491Z",
   "signedBy": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
   "subject": {
     "attemptId": "DL-03/guarded/r2#3",
@@ -972,7 +972,7 @@
     },
     "paymentRequest": {
       "ok": true,
-      "detail": "ACK-Pay payment request signed by did:key:zQ3shPyQuVuUcR8fV3KqEYg4eCMqJuyr7rm3Seno3M53ZSCCf"
+      "detail": "ACK-Pay payment request signed by did:key:zQ3shPyQuVuUcR8fV3KqEYg4eCMqJuyr7rm3Seno3M53ZSCCf, as the pack reports"
     },
     "receipt": {
       "ok": true,
@@ -984,6 +984,6 @@
     }
   },
   "verifyCommand": "pnpm dispute-verify <this file> --signer did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
-  "packHash": "c6c60f36fff71c95bebb431abc204ae4f8b80e456881b15c5a8d95536b521ce9",
-  "packSignature": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ4NDQ3NjMsImZvcm1hdCI6ImFjay1ndWFyZC1kaXNwdXRlLXBhY2svMSIsInBhY2tIYXNoIjoiYzZjNjBmMzZmZmY3MWM5NWJlYmI0MzFhYmMyMDRhZTRmOGI4MGU0NTY4ODFiMTVjNWE4ZDk1NTM2YjUyMWNlOSIsImlzcyI6ImRpZDprZXk6ejZNa21VTFRyYWJYTFY3cGNNWUhDcXhmM1pWd0F1UFJaVXJHUkZ4VlYzb1dvYWZwIn0.BDbf5_DThysDd2rUjqbaatmm2LSQbX0yVVf5daiUEqMFG5tQU2q-lq53qgFpeB2N0tJAu88cYx4zOgaSAq9UAQ"
+  "packHash": "41e93e978045e0084817a179ff069d5914aed4d049e26b6157c4ec0c109995e9",
+  "packSignature": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3OTQ4NDU4MTIsImZvcm1hdCI6ImFjay1ndWFyZC1kaXNwdXRlLXBhY2svMSIsInBhY2tIYXNoIjoiNDFlOTNlOTc4MDQ1ZTAwODQ4MTdhMTc5ZmYwNjlkNTkxNGFlZDRkMDQ5ZTI2YjYxNTdjNGVjMGMxMDk5OTVlOSIsImlzcyI6ImRpZDprZXk6ejZNa21VTFRyYWJYTFY3cGNNWUhDcXhmM1pWd0F1UFJaVXJHUkZ4VlYzb1dvYWZwIn0.PKSTq9Xkov6g3pC_gtRr_GEmm7EHAyRTR3rLdW519FhwuOg3MGG81PfeoH2Z8yF-Ivxo4KS5MxyruF3hXa0yAg"
 }

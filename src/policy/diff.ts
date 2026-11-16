@@ -79,6 +79,7 @@ export function describePolicyChange(a: PolicyDocument, b: PolicyDocument): stri
   for (const [k, ma] of am) {
     const mb = bm.get(k)
     if (!mb) continue
+    if (ma.name !== mb.name) out.push(`Merchant ${k} renamed: ${ma.name} -> ${mb.name}`)
     if (ma.hosts.join(",") !== mb.hosts.join(",")) out.push(`${ma.name} hosts: ${ma.hosts.join(", ")} -> ${mb.hosts.join(", ")}`)
     if ((ma.payout ?? "") !== (mb.payout ?? "") || (ma.did ?? "") !== (mb.did ?? "")) out.push(`${ma.name} identity or payout account changed`)
     const ea = new Map(ma.sells.map((e) => [e.path, e]))
@@ -89,6 +90,7 @@ export function describePolicyChange(a: PolicyDocument, b: PolicyDocument): stri
       const f = eb.get(p)
       if (f && f.price !== e.price) out.push(`${ma.name} ${p} price: $${e.price} -> $${f.price}`)
       if (f && f.capability !== e.capability) out.push(`${ma.name} ${p} capability: ${e.capability} -> ${f.capability}`)
+      if (f && (f.description ?? "") !== (e.description ?? "")) out.push(`${ma.name} ${p} description changed`)
     }
   }
   const ra = new Map(a.rules.map((r) => [r.id, r]))
@@ -96,9 +98,12 @@ export function describePolicyChange(a: PolicyDocument, b: PolicyDocument): stri
     const o = ra.get(r.id)
     if (!o) continue
     if ((o.enabled !== false) !== (r.enabled !== false)) out.push(`Rule ${r.id} switched ${r.enabled === false ? "off" : "on"}`)
+    if (o.plain !== r.plain) out.push(`Rule ${r.id} plain-English explanation changed: "${r.plain}"`)
     if (o.on_fail !== r.on_fail) out.push(`Rule ${r.id} failures: ${o.on_fail === "deny" ? "refused" : "sent to a human"} -> ${r.on_fail === "deny" ? "refused" : "sent to a human"}`)
   }
-  if (!out.length && a.version !== b.version) out.push(`Version ${a.version} -> ${b.version} (no rule, limit or merchant changes)`)
+  if (a.name !== b.name) out.push(`Policy name: ${a.name} -> ${b.name}`)
+  if (a.version !== b.version) out.push(`Version ${a.version} -> ${b.version}`)
+  // Merchant order matters only for lookups by key; DIDs are unique (enforced), so order changes are not reported.
   return out
 }
 

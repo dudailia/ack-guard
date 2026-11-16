@@ -129,6 +129,57 @@ describe("dispute evidence pack", () => {
     }
   })
 
+  it("a pack for an attempt refused on REQ_SIGNATURE verifies, reporting the request as invalid (second review)", async () => {
+    const { tmpLogPath } = await import("./helpers.js")
+    const { World } = await import("../src/world.js")
+    const { usd } = await import("../src/config.js")
+    const { AuditLog } = await import("../src/audit/chain.js")
+    const { writeGenesis } = await import("../src/audit/genesis.js")
+    const { buildPolicyConfig } = await import("../src/policy/config.js")
+    const audit = await AuditLog.open(tmpLogPath(), ids.parties.guard)
+    await writeGenesis(audit, ids, buildPolicyConfig(ids))
+    await audit.append("task", { episodeId: "sig", mode: "guarded", task: { id: "t", prompt: "", needs: ["weather.forecast"], budget: "100" } })
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: ["weather.forecast"], budget: usd(1) } }, "guarded", audit, "sig")
+    const r = await w.pay({ paymentRequest: "eyJhbGciOiJFUzI1NksifQ.eyJub3QiOiJyZWFsIn0.AAAA", purpose: "x" })
+    expect(r.status === "blocked" && r.rule).toBe("REQ_SIGNATURE")
+    const pack = await buildDisputePack(audit.path, "sig#1", { guard: ids.parties.guard })
+    expect(pack.paymentRequest.ok).toBe(false)
+    const v = await verifyDisputePack(JSON.parse(JSON.stringify(pack)), { signer: ids.parties.guard.did })
+    expect(v.ok, JSON.stringify(v.checks)).toBe(true)
+  })
+
+  it("the agent steps, head, settlement, receipt, mode and stored results are bound to the signed entries (second review)", async () => {
+    const edits: [string, (p: DisputePack) => void, string][] = [
+      ["agent steps", (p) => (p.agentReasoning = p.agentReasoning.slice(1)), "matchesLog"],
+      ["head hash", (p) => (p.evidence.logHeadHash = "0".repeat(64)), "matchesLog"],
+      ["settlement", (p) => ((p.settlement as { amount: string }).amount = "1"), "matchesLog"],
+      ["receipt issuer", (p) => (p.receipt!.issuer = ids.parties.attacker.did), "matchesLog"],
+      ["mode", (p) => (p.subject.mode = "naive"), "matchesLog"],
+      ["request description", (p) => (p.paymentRequest.description = "something else"), "paymentRequest"],
+      ["chain expiry", (p) => (p.delegation.links[1]!.expiresAt = "2099-01-01T00:00:00.000Z"), "delegationChain"],
+      ["dropped settlement", (p) => (p.evidence.entries = p.evidence.entries.filter((e) => e.kind !== "settlement" && e.kind !== "receipt")), "matchesLog"],
+    ]
+    for (const [name, edit, check] of edits) {
+      const p = clone(paid)
+      edit(p)
+      const v = await verifyDisputePack(p, { signer: ids.parties.guard.did, skipPackSignature: true })
+      expect(v.checks[check]?.ok, name).toBe(false)
+    }
+    // Stored results that differ from a fresh run are caught even when the pack is re-signed by the guard.
+    const { createJwt } = await import("agentcommercekit")
+    const { canonicalJson } = await import("../src/audit/chain.js")
+    const { createHash } = await import("node:crypto")
+    const p = clone(blocked)
+    p.verification.matchesLog = { ok: true, detail: "x" }
+    p.subject.amount = "$0.01"
+    p.packHash = createHash("sha256").update(canonicalJson({ ...p, packHash: undefined, packSignature: undefined })).digest("hex")
+    p.packSignature = await createJwt({ format: p.format, packHash: p.packHash }, { issuer: ids.parties.guard.did, signer: ids.parties.guard.signer }, { alg: ids.parties.guard.alg })
+    const v = await verifyDisputePack(p, { signer: ids.parties.guard.did })
+    expect(v.checks.packSignature?.ok).toBe(true)
+    expect(v.checks.matchesLog?.ok).toBe(false)
+    expect(v.checks.storedResults?.ok).toBe(false)
+  })
+
   it("renders a one-page PDF", async () => {
     const bytes = await renderDisputePdf(paid)
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-")

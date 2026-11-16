@@ -92,6 +92,35 @@ describe("policy diff on delegation decisions (review finding)", () => {
   }, 60_000)
 })
 
+describe("policy diff summary and identity (second review)", () => {
+  it("a second merchant entry with an existing merchant's identity is refused; explanation changes are reported", async () => {
+    const { configFor } = await import("../src/policy/config.js")
+    const mirror = variant((t) =>
+      t.replace(
+        "  - key: skycast\n",
+        `  - key: skycast-eu\n    name: SkyCast EU mirror\n    did: ${ids.parties.skycast.did}\n    hosts: [skycast.test]\n    sells:\n      - { path: /history, capability: weather.forecast, price: "1.50" }\n  - key: skycast\n`,
+      ),
+    )
+    expect(() => configFor(ids, mirror)).toThrow(/same identity as another merchant/)
+    const reworded = variant((t) => t.replace("No single payment can be larger than the per-payment cap.", "Single payments are fine."))
+    const d = await policyDiff(log, current, reworded, { expectedSignerDid: ids.parties.guard.did })
+    expect(d.policyChanges.some((c) => c.startsWith("Rule PER_PAYMENT_CAP plain-English explanation changed"))).toBe(true)
+  })
+
+  it("a diff that replayed no past decisions cannot be approved", async () => {
+    const empty = join(mkdtempSync(join(tmpdir(), "ack-guard-empty-")), "audit.jsonl")
+    const { AuditLog } = await import("../src/audit/chain.js")
+    const { writeGenesis } = await import("../src/audit/genesis.js")
+    const { buildPolicyConfig } = await import("../src/policy/config.js")
+    const a = await AuditLog.open(empty, ids.parties.guard)
+    await writeGenesis(a, ids, buildPolicyConfig(ids))
+    const p = variant((t) => t.replace('daily_cap: "20.00"', 'daily_cap: "15.00"'))
+    const d = await policyDiff(empty, current, p, { expectedSignerDid: ids.parties.guard.did })
+    expect(d.decisionsReplayed).toBe(0)
+    await expect(approvePolicyChange({ ids, current, proposed: p, diff: d, dir: mkdtempSync(join(tmpdir(), "ack-guard-policy-")) })).rejects.toThrow(/replayed no past decisions/)
+  })
+})
+
 describe("policy approvals", () => {
   it("an approved change is owner-signed, logged, and becomes the active policy; nothing else can", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ack-guard-policy-"))

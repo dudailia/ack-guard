@@ -114,6 +114,19 @@ export type MerchantResolver = (key: string) => { did: string; recipient: string
 export function policyConfig(p: LoadedPolicy, owner: { ownerDid: string; agentDid: string }, resolve: MerchantResolver): PolicyConfig {
   const d = p.doc
   const money = (s: string) => decimalToSubunits(s, d.decimals)
+  const cfg = buildConfig(p, owner, resolve, money)
+  // One registry entry per merchant identity: the engine matches merchants by DID,
+  // so a second entry with the same DID would silently shadow the first.
+  const dids = new Set<string>()
+  for (const m of cfg.merchants) {
+    if (dids.has(m.did)) throw new PolicyError(`merchant ${m.key} has the same identity as another merchant in the policy`)
+    dids.add(m.did)
+  }
+  return cfg
+}
+
+function buildConfig(p: LoadedPolicy, owner: { ownerDid: string; agentDid: string }, resolve: MerchantResolver, money: (s: string) => bigint): PolicyConfig {
+  const d = p.doc
   return {
     ownerDid: owner.ownerDid,
     agentDid: owner.agentDid,

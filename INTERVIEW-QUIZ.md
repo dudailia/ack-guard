@@ -223,7 +223,7 @@ It contains:
 - the raw signed log entries those claims rest on, with the signed head
 - the did:web documents needed offline
 
-The whole bundle is signed by the guard. `pnpm dispute-verify` checks it from the file alone, including the chain as of the payment time. It proves what the guard recorded and signed for that attempt. It does not prove the log holds nothing else about the payment; that needs the full log checked against an independently published head hash.
+The whole bundle is signed by the guard. `pnpm dispute-verify` checks it from the file alone: guard signatures against the pinned did:key itself; every field the pack and its PDF state against the signed entries; the ACK artifacts and the chain (as of the payment time) exactly as the pack reports them; and the stored results against a fresh run. Independent reviews found two holes before this held: a pack forged without the guard key by planting a DID document for the guard's own DID, and summary fields the verifier did not yet compare (changing those still needed the guard key). Both are now regression tests. It proves what the guard recorded and signed for that attempt. It does not prove the log holds nothing else about the payment; that needs the full log checked against an independently published head hash.
 
 **29. A delegation link expired last week. Can the pack for a payment made under it still verify?**
 

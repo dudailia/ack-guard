@@ -82,10 +82,13 @@ export async function renderDisputePdf(pack: DisputePack): Promise<Uint8Array> {
   y -= 4
 
   // Outcome banner
-  const bannerColor = paid ? GREEN : s.outcome === "needs_approval" ? AMBER : RED
+  const bannerColor = paid ? (s.mode !== "guarded" ? AMBER : GREEN) : s.outcome === "needs_approval" ? AMBER : RED
+  const naive = s.mode !== "guarded" || s.decidingRule === "NO_GUARD"
   const verdict = paid
-    ? `PAID ${s.amount ?? ""} to ${s.merchant ?? "?"} ${s.endpoint ?? ""}: every policy rule passed`
-    : `NOT PAID: ${s.outcome === "needs_approval" ? "held for a human, who declined" : `blocked by ${s.decidingRule}`}`
+    ? `PAID ${s.amount ?? ""} to ${s.merchant ?? "the merchant"} ${s.endpoint ?? ""}: ${naive ? "naive agent, no policy was applied" : "every policy rule passed"}`
+    : s.outcome === "failed"
+      ? "NOT PAID: the guard allowed it, but settlement failed"
+      : `NOT PAID: ${s.outcome === "needs_approval" ? "held for a human, who declined" : `blocked by ${s.decidingRule}`}`
   page.drawRectangle({ x: M, y: y - 30, width: W, height: 36, color: rgb(0.97, 0.98, 0.97), borderColor: bannerColor, borderWidth: 1.2 })
   y -= 12
   text(verdict, { f: bold, size: 11, color: bannerColor, x: 10, width: W - 20, max: 1 })
@@ -137,7 +140,7 @@ export async function renderDisputePdf(pack: DisputePack): Promise<Uint8Array> {
   kv("Payment request", `${pack.paymentRequest.ok ? "verifies" : "does NOT verify"}: signed by ${shortDid(pack.paymentRequest.issuer)}, "${pack.paymentRequest.description ?? ""}"`)
   kv("Receipt", pack.receipt ? `${pack.receipt.ok ? "verifies" : "does NOT verify"}: PaymentReceiptCredential from ${shortDid(pack.receipt.issuer)} for ${pack.receipt.txId ?? "?"}` : "none (no money moved)")
 
-  heading("Verification results (re-run from the pack alone)")
+  heading("Verification results when the pack was built (pnpm dispute-verify re-runs them)")
   for (const [k, c] of Object.entries(pack.verification)) {
     page.drawText(c.ok ? "OK" : "FAIL", { x: M, y, size: 7.5, font: bold, color: c.ok ? GREEN : RED })
     page.drawText(safe(k), { x: M + 24, y, size: 7.5, font: bold, color: INK })
@@ -148,7 +151,7 @@ export async function renderDisputePdf(pack: DisputePack): Promise<Uint8Array> {
 
   heading("Check it yourself")
   text(pack.verifyCommand.replace("<this file>", "<pack.json>"), { f: mono, size: 7.5, max: 2 })
-  text(`Pack hash ${pack.packHash ?? "?"}, signed by guard ${pack.signedBy}. Log ${pack.evidence.log}: ${pack.evidence.logEntries} entries, head ${pack.evidence.logHeadHash ?? "?"}.`, { size: 7, color: MUTED, max: 3 })
+  text(`Pack hash ${pack.packHash ?? "?"}, signed by guard ${pack.signedBy}. Log ${pack.evidence.log}: ${pack.evidence.head.seq + 1} entries, signed head ${pack.evidence.head.hash}.`, { size: 7, color: MUTED, max: 3 })
   text("The pack proves what the guard recorded and signed for this attempt. To rule out a rolled-back or swapped log, compare the head hash with an independently published copy (pnpm verify-log --expect-head).", { size: 7, color: MUTED, max: 2 })
 
   drawFooter(page, font)
