@@ -21,6 +21,7 @@ import {
   parseJwtCredential,
   signCredential,
   verifyParsedCredential,
+  verifyJwt,
   createCredential,
   type DidResolver,
   type DidUri,
@@ -162,5 +163,47 @@ export async function verifyDelegationChain(
   }
   if (!firstError && links[links.length - 1]?.subject !== opts.payerDid) firstError = `the chain ends at ${short(links[links.length - 1]?.subject)}, not at the paying agent ${short(opts.payerDid)}`
   if (!firstError && !chain.length) firstError = "empty delegation chain"
+  return { ok: !firstError, error: firstError, links, payerDid: opts.payerDid }
+}
+
+/**
+ * Verifies a chain as of a past moment (the payment time), for dispute
+ * evidence that must still check out after its links expire. Each link's JWT
+ * signature and expiry are checked by ACK's verifyJwt with the clock set to
+ * `at`, then ACK's controller-claim verifier runs on the credential subject.
+ */
+export async function verifyDelegationChainAt(
+  chain: string[],
+  opts: { resolver: DidResolver; ownerDid: string; rootAgentDid: string; payerDid: string; at: Date },
+): Promise<ChainVerification> {
+  const links: LinkFacts[] = []
+  let expectedIssuer = opts.ownerDid
+  let firstError: string | undefined
+  const now = Math.floor(opts.at.getTime() / 1000)
+  for (let i = 0; i < chain.length; i++) {
+    const jwt = chain[i]!
+    const lf: LinkFacts = { index: i, id: linkId(jwt), ok: false, ...peekLink(jwt) }
+    links.push(lf)
+    try {
+      const v = await verifyJwt(jwt, { resolver: opts.resolver, issuer: expectedIssuer, policies: { now, aud: false } })
+      const vc = (v.payload as { vc?: { type?: string[]; credentialSubject?: Record<string, unknown>; expirationDate?: string } }).vc
+      if (!vc?.type?.includes("ControllerCredential")) throw new Error("not a ControllerCredential")
+      const subject: Record<string, unknown> & { id: string } = { ...vc.credentialSubject, id: v.payload.sub as string }
+      if (vc.expirationDate && Date.parse(vc.expirationDate) < opts.at.getTime()) throw new Error(`expired at ${vc.expirationDate}`)
+      if (subject.controller !== expectedIssuer) throw new Error(`controller ${short(subject.controller as string)} is not the parent ${short(expectedIssuer)}`)
+      await getControllerClaimVerifier().verify(subject, opts.resolver)
+      const d = subject.delegation as { budget: string; currency: string; capabilities: string[] } | undefined
+      if (d) lf.scope = { budget: d.budget, currency: d.currency, capabilities: d.capabilities }
+      if (i === 0 && lf.subject !== opts.rootAgentDid) throw new Error(`the root link is for ${short(lf.subject)}, not the configured agent`)
+      lf.ok = true
+      expectedIssuer = lf.subject!
+    } catch (e) {
+      const msg = (e as Error).message
+      lf.error = /expired/i.test(msg) ? msg : /issuer/i.test(msg) ? `issued by ${short(lf.issuer)}, not by the parent ${short(expectedIssuer)}` : /signature/i.test(msg) ? "signature does not verify for the issuer it names" : msg
+      firstError = `link ${i} (${short(lf.issuer)} -> ${short(lf.subject)}): ${lf.error}`
+      break
+    }
+  }
+  if (!firstError && links[links.length - 1]?.subject !== opts.payerDid) firstError = `the chain ends at ${short(links[links.length - 1]?.subject)}, not at the paying agent ${short(opts.payerDid)}`
   return { ok: !firstError, error: firstError, links, payerDid: opts.payerDid }
 }

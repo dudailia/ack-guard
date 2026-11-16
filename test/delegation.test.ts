@@ -64,6 +64,22 @@ describe("delegation chain verification", () => {
   })
 })
 
+describe("delegation chain as of a past time (dispute evidence)", () => {
+  it("a chain valid at payment time still verifies after its links expire; a forged one never does", async () => {
+    const { verifyDelegationChainAt } = await import("../src/identity/delegation.js")
+    const issuedAt = new Date(Date.now() - 3 * H)
+    const expiresAt = new Date(Date.now() - H)
+    const l0 = await issueDelegation({ parent: ids.parties.owner, childDid: ids.parties.agent.did, issuedAt, expiresAt })
+    const l1 = await issueDelegation({ parent: ids.parties.agent, childDid: sub.did, issuedAt, expiresAt, scope: scope(50, ["weather.forecast"]) })
+    const forged = await issueDelegation({ parent: ids.parties.agent, childDid: sub.did, issuedAt, expiresAt, signWith: ids.parties.attacker })
+    const paymentTime = new Date(Date.now() - 2 * H)
+    expect((await verifyDelegationChain([l0, l1], opts(sub.did))).ok).toBe(false)
+    expect((await verifyDelegationChainAt([l0, l1], { ...opts(sub.did), at: paymentTime })).ok).toBe(true)
+    expect((await verifyDelegationChainAt([l0, l1], { ...opts(sub.did), at: new Date() })).ok).toBe(false)
+    expect((await verifyDelegationChainAt([l0, forged], { ...opts(sub.did), at: paymentTime })).error).toMatch(/signature does not verify/)
+  })
+})
+
 /** A world in which `payer` pays through `chain`, sharing `store`. */
 function worldFor(payer: "agent" | "subagent", chain: string[], store: SpendStore, audit: Awaited<ReturnType<typeof tmpAudit>>, ep: string, needs = Array(8).fill("weather.forecast")) {
   return new World(ids, { task: { id: "shared-task", prompt: "", needs, budget: usd(5) }, delegation: { payer, chain } }, "guarded", audit, ep, undefined, store)
