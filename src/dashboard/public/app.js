@@ -84,10 +84,13 @@ async function checkIntegrity() {
   if (!state.log) return
   try {
     const v = await api(`/api/verify?log=${encodeURIComponent(state.log)}`)
-    el.className = `integrity ${v.ok ? "ok" : "bad"}`
-    el.textContent = v.ok
-      ? `Audit log verified: ${v.entries} signed entries`
-      : `Tampering detected at entry ${v.firstBadSeq ?? "?"}`
+    el.className = `integrity ${v.ok ? (v.pinned ? "ok" : "") : "bad"}`
+    el.title = v.signerSource || ""
+    el.textContent = !v.ok
+      ? `Tampering detected at entry ${v.firstBadSeq ?? "?"}`
+      : v.pinned
+        ? `Audit log verified: ${v.entries} entries signed by this machine's guard key`
+        : `Chain intact (${v.entries} entries), signer not pinned`
   } catch (e) {
     el.className = "integrity bad"
     el.textContent = e.message
@@ -109,6 +112,7 @@ function outcomeTag(a) {
   if (a.outcome === "paid") return a.mode === "naive" ? ["paid-naive", "Paid, no guard"] : ["paid", "Paid"]
   if (a.outcome === "needs_approval") return ["held", "Human declined"]
   if (a.outcome === "awaiting_approval") return ["held", "Waiting for a human"]
+  if (a.outcome === "failed") return ["held", "Payment failed"]
   if (a.outcome === "deny") return ["stopped", "Blocked"]
   return ["held", a.outcome]
 }
@@ -172,7 +176,9 @@ async function replay(id) {
       ? r.mode === "naive"
         ? "Paid. The naive agent has no policy, so nothing checked this payment."
         : "Paid. Every policy rule passed."
-      : r.finalOutcome === "needs_approval"
+      : r.finalOutcome === "failed"
+        ? `Payment failed at settlement: ${r.error || "unknown error"}`
+        : r.finalOutcome === "needs_approval"
         ? `Held for a human, who declined. Rule: ${last?.rule?.id}`
         : `Blocked by ${last?.rule?.id}: ${last?.rule?.detail}`
   const yes = (b) => (b ? `<span class="ok">verified</span>` : `<span class="bad">failed</span>`)
@@ -218,7 +224,8 @@ async function replay(id) {
           : `<p class="muted">No money moved.</p>`
       }</div></li>
       <li><div><h3>Log integrity</h3><dl class="kv"><dt>Whole log (${r.chain.entries} entries)</dt><dd>${yes(r.chain.ok)}${r.chain.ok ? "" : ` (first bad entry ${esc(r.chain.firstBadSeq)})`}</dd>
-        <dt>Entries in this replay</dt><dd>${yes(r.chain.relatedEntriesIntact)} (${r.chain.relatedSeqs.length} entries)</dd></dl></div></li>
+        <dt>Entries in this replay</dt><dd>${yes(r.chain.relatedEntriesIntact)} (${r.chain.relatedSeqs.length} entries)</dd>
+        <dt>Signer</dt><dd>${r.chain.pinned ? `<span class="ok">${esc(r.signerSource)}</span>` : `<span class="bad">${esc(r.signerSource)}</span>. Identity and receipt checks rely on the log's own genesis entry.`}</dd></dl></div></li>
     </ol>`
 }
 
@@ -228,7 +235,7 @@ async function tamper() {
   const btn = $("#tamper-btn")
   btn.disabled = true
   try {
-    const r = await api(`/api/tamper-demo?log=${encodeURIComponent(state.log)}`, { method: "POST" })
+    const r = await api(`/api/tamper-demo?log=${encodeURIComponent(state.log)}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
     const probs = r.after.problems.slice(0, 4).map((p) => `<li>entry ${esc(p.seq)}: ${esc(p.kind)}, ${esc(p.detail)}</li>`).join("")
     out.innerHTML = `<div class="result"><b>${r.after.ok ? "Not detected" : `Detected. First bad entry: ${esc(r.after.firstBadSeq)}`}</b>.
       Changed entry ${esc(r.tamperedSeq)} in a copy (${esc(r.change)}). The original log still verifies: ${r.before.ok ? "yes" : "no"}.<ul>${probs}</ul></div>`

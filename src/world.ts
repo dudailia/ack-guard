@@ -172,7 +172,20 @@ export class World {
     return renderHttpForAgent(await this.httpGet(url), this)
   }
 
-  async pay(input: PayInput): Promise<PayResult> {
+  /**
+   * Payments are serialized: the AI SDK can run several tool calls from one
+   * model step concurrently, and each decision must see every earlier payment
+   * in the spend history (duplicate, budget and daily-cap rules).
+   */
+  private payQueue: Promise<unknown> = Promise.resolve()
+
+  pay(input: PayInput): Promise<PayResult> {
+    const p = this.payQueue.then(() => this.payOne(input))
+    this.payQueue = p.catch(() => undefined)
+    return p
+  }
+
+  private async payOne(input: PayInput): Promise<PayResult> {
     const attemptId = `${this.episodeId}#${++this.attemptCounter}`
     const base = { episodeId: this.episodeId, attemptId, mode: this.mode }
     const token = this.resolvePaymentRequest(input.paymentRequest)
@@ -219,7 +232,7 @@ export class World {
     } else {
       await this.audit.append("decision", {
         ...base,
-        decision: { outcome: "allow", rule: { id: "NO_GUARD", title: "Naive agent: no policy", detail: "paid without checks" }, checks: [] },
+        decision: { outcome: "allow", rule: { id: "NO_GUARD", title: "Naive agent: no policy", detail: "no policy checks applied" }, checks: [] },
         facts: factsForLog(facts),
       })
     }
@@ -227,6 +240,7 @@ export class World {
     // Settlement: both modes need a validly signed request with a real option.
     if (!facts.requestSignature.ok || !facts.option) {
       const result: PayResult = { status: "error", message: `Cannot pay: ${facts.requestSignature.error ?? "payment option not found"}` }
+      await this.audit.append("payment_error", { ...base, error: result.message })
       this.outcomes.push({ attemptId, result, decision })
       return result
     }
@@ -244,6 +258,7 @@ export class World {
       })
     } catch (e) {
       const result: PayResult = { status: "error", message: `Payment failed: ${(e as Error).message}` }
+      await this.audit.append("payment_error", { ...base, error: result.message })
       this.outcomes.push({ attemptId, result, decision })
       return result
     }
@@ -343,11 +358,20 @@ function peekPaymentRequest(token: string): { description?: string; options: { i
   return undefined
 }
 
+function safeAmount(o: { amount: string | number; decimals: number; currency: string }): string {
+  try {
+    if (!Number.isInteger(o.decimals) || o.decimals < 0 || o.decimals > 18) return "invalid amount"
+    return formatAmount(BigInt(o.amount), o.decimals, o.currency)
+  } catch {
+    return "invalid amount"
+  }
+}
+
 function labelFor(token: string, world: World): string {
   const pr = peekPaymentRequest(token)
   if (!pr) return token
   const o = pr.options[0]
-  const amt = o ? formatAmount(BigInt(o.amount), o.decimals, o.currency) : "?"
+  const amt = o ? safeAmount(o) : "?"
   return `[ACK payment request ${world.refFor(token)}: "${pr.description ?? ""}", ${amt} to ${o?.recipient ?? "?"}]`
 }
 
@@ -359,22 +383,18 @@ function labelFor(token: string, world: World): string {
 export function renderHttpForAgent(r: { status: number; url: string; body: unknown }, world: World) {
   const swapTokens = (text: string) => text.replace(TOKEN_RE, (t) => labelFor(t, world))
   if (r.status === 402 && r.body && typeof r.body === "object") {
-    const { paymentRequest, paymentRequestToken, ...rest } = r.body as {
-      paymentRequestToken?: string
-      paymentRequest?: { description?: string; paymentOptions?: { id: string; amount: string | number; decimals: number; currency: string; recipient: string }[] }
-    }
+    // The agent's view of the quote comes from the token that will actually be
+    // paid, not from the unsigned `paymentRequest` echo in the body.
+    const { paymentRequest: _unsignedEcho, paymentRequestToken, ...rest } = r.body as { paymentRequestToken?: string; paymentRequest?: unknown }
+    const signed = paymentRequestToken ? peekPaymentRequest(paymentRequestToken) : undefined
     const extra = JSON.parse(swapTokens(JSON.stringify(rest))) as Record<string, unknown>
     return {
       status: 402,
       url: r.url,
       ...extra,
       payment_request: paymentRequestToken ? world.refFor(paymentRequestToken) : undefined,
-      description: paymentRequest?.description,
-      payment_options: (paymentRequest?.paymentOptions ?? []).map((o) => ({
-        id: o.id,
-        amount: formatAmount(BigInt(o.amount), o.decimals, o.currency),
-        recipient: o.recipient,
-      })),
+      description: signed?.description,
+      payment_options: (signed?.options ?? []).map((o) => ({ id: o.id, amount: safeAmount(o), recipient: o.recipient })),
     }
   }
   const raw = typeof r.body === "string" ? r.body : JSON.stringify(r.body)

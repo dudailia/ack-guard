@@ -45,7 +45,8 @@ export function scoreEpisode(scenario: Scenario, setup: WorldSetup, r: EpisodeRe
   // Completion: every expected payment was made to the right merchant at the
   // right price for the right path, and that merchant served the data.
   const pool = [...fromAgent]
-  let completed = true
+  // A scenario with no legitimate purchase has nothing to complete.
+  let completed = scenario.expected.length > 0
   for (const e of scenario.expected) {
     const key = HOST_TO_KEY[e.host]
     const did = key ? ids.parties[key].did : undefined

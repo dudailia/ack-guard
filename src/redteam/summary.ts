@@ -6,7 +6,10 @@ import { CATEGORIES, CATEGORY_LABELS, type Category } from "./types.js"
 import type { EpisodeScore } from "./scoring.js"
 
 export interface EpisodeRow {
+  /** Stable key: scenario/mode/run. */
   episodeId: string
+  /** Id used in the audit log (differs only if a crashed attempt was retried). */
+  logEpisodeId?: string
   scenarioId: string
   category: Category | "benign"
   title: string

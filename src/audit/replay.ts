@@ -45,6 +45,7 @@ export interface ReplayResult {
   settlement?: { seq: number; tx: Record<string, unknown> }
   receipt?: { seq: number; jwt: string; issuer: string; verifiedNow: { ok: boolean; error?: string; txId?: string } }
   chain: VerifyReport & { relatedSeqs: number[]; relatedEntriesIntact: boolean }
+  error?: string
   finalOutcome: string
 }
 
@@ -65,6 +66,7 @@ export function listAttempts(path: string): AttemptSummary[] {
     const d = lastDecision.get(attemptId)
     const dec = d?.payload.decision as { outcome?: string; rule?: { id?: string }; merchant?: string; amount?: string } | undefined
     const settled = entries.some((x) => x.kind === "settlement" && x.payload.attemptId === attemptId)
+    const failed = entries.some((x) => x.kind === "payment_error" && x.payload.attemptId === attemptId)
     const answered = entries.some((x) => x.kind === "approval" && x.payload.attemptId === attemptId)
     const t = tasks.get(e.payload.episodeId as string)
     out.push({
@@ -73,7 +75,7 @@ export function listAttempts(path: string): AttemptSummary[] {
       mode: e.payload.mode as string,
       scenarioId: t?.payload.scenarioId as string | undefined,
       category: t?.payload.category as string | undefined,
-      outcome: settled ? "paid" : dec?.outcome === "needs_approval" && !answered ? "awaiting_approval" : (dec?.outcome ?? "unknown"),
+      outcome: settled ? "paid" : failed ? "failed" : dec?.outcome === "needs_approval" && !answered ? "awaiting_approval" : (dec?.outcome ?? "unknown"),
       rule: dec?.rule?.id ?? "?",
       amount: dec?.amount,
       merchant: dec?.merchant,
@@ -98,6 +100,7 @@ export async function replayAttempt(
     agentDid?: string
     agentDidDocument?: DidDocument
     controllerCredential?: string
+    receiptServiceDid?: string
   }
   // The agent's did:web document was recorded (and signed) in the genesis entry.
   if (g.agentDid && g.agentDidDocument) resolver.addToCache(g.agentDid as `did:${string}:${string}`, g.agentDidDocument)
@@ -136,16 +139,20 @@ export async function replayAttempt(
     })
   const ap = related.find((e) => e.kind === "approval")
   const st = related.find((e) => e.kind === "settlement")
+  const err = related.find((e) => e.kind === "payment_error")
   const rc = related.find((e) => e.kind === "receipt")
   let receipt: ReplayResult["receipt"]
   if (rc) {
     const jwt = rc.payload.receipt as string
-    const issuer = rc.payload.receiptIssuer as string
+    // Trust the receipt service named in the (guard-signed) genesis entry, not the receipt entry itself.
+    const issuer = g.receiptServiceDid ?? (rc.payload.receiptIssuer as string)
     const v = await checkReceipt(jwt, { resolver, trustedReceiptIssuers: [issuer], paymentRequestIssuer: request?.issuer })
     receipt = { seq: rc.seq, jwt, issuer, verifiedNow: { ok: v.ok, error: v.error, txId: v.txId } }
   }
 
-  const chain = await verifyLog(path, { expectedSignerDid: opts.expectedSignerDid ?? g.guardDid, resolver })
+  // Only an externally supplied signer counts as pinned. Without one, the
+  // identity and receipt checks above are relative to the log's own genesis.
+  const chain = await verifyLog(path, { expectedSignerDid: opts.expectedSignerDid, resolver })
   const relatedSeqs = [genesis?.seq, task?.seq, ...reasoning.map((r) => r.seq), ...related.map((e) => e.seq)].filter(
     (s): s is number => typeof s === "number",
   )
@@ -174,6 +181,7 @@ export async function replayAttempt(
     settlement: st ? { seq: st.seq, tx: st.payload.tx as Record<string, unknown> } : undefined,
     receipt,
     chain: { ...chain, relatedSeqs, relatedEntriesIntact: relatedSeqs.every((s) => !badSeqs.has(s)) },
-    finalOutcome: st ? "paid" : (lastDecision?.outcome ?? "unknown"),
+    error: err ? (err.payload.error as string) : undefined,
+    finalOutcome: st ? "paid" : err ? "failed" : (lastDecision?.outcome ?? "unknown"),
   }
 }

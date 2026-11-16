@@ -27,6 +27,8 @@ export interface VerifyReport {
   ok: boolean
   entries: number
   signerDid?: string
+  /** True only when the expected signer came from outside the log (operator config or --signer). */
+  pinned: boolean
   firstBadSeq: number | null
   problems: VerifyProblem[]
 }
@@ -99,7 +101,9 @@ export async function verifyLog(
     } else {
       const head = JSON.parse(readFileSync(hp, "utf8")) as { seq: number; hash: string; sig: string }
       const payload = signerDid ? await sigOk(head.sig, signerDid, resolver) : null
-      if (!payload || payload.hash !== head.hash || payload.seq !== head.seq) {
+      // Require the head marker: an ordinary entry signature over {seq, hash}
+      // must not be usable as a head checkpoint after truncating the log.
+      if (!payload || payload.head !== true || payload.hash !== head.hash || payload.seq !== head.seq) {
         problems.push({ seq: head.seq, line: entries.length, kind: "bad_head_signature", detail: "head checkpoint signature invalid" })
       } else if (!last || last.seq !== head.seq || last.hash !== head.hash) {
         problems.push({
@@ -112,6 +116,13 @@ export async function verifyLog(
     }
   }
 
-  const firstBad = problems.find((p) => p.seq !== null)?.seq ?? (problems.length ? null : null)
-  return { ok: problems.length === 0, entries: entries.length, signerDid, firstBadSeq: firstBad, problems }
+  const firstBad = problems.find((p) => p.seq !== null)?.seq ?? null
+  return {
+    ok: problems.length === 0,
+    entries: entries.length,
+    signerDid,
+    pinned: opts.expectedSignerDid !== undefined,
+    firstBadSeq: firstBad,
+    problems,
+  }
 }

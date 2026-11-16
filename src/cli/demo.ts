@@ -44,7 +44,7 @@ const dashboardApprover =
   (episodeId: string): Approver =>
   ({ decision, task }) =>
     new Promise((resolve) => {
-      const id = `ap_${++approvalCounter}`
+      const id = `ap_${++approvalCounter}_${crypto.randomUUID()}`
       const timer = setTimeout(() => {
         if (approvals.delete(id)) resolve({ approved: false, by: "timeout (no human answered in 10 minutes)" })
       }, 10 * 60 * 1000)
@@ -94,6 +94,7 @@ const { url } = startDashboard({
   scenarios,
   approvals,
   liveInfo: () => ({ model: model.label }),
+  operatorGuardDid: ids.parties.guard.did,
   runScenario: async (scenarioId, mode) => {
     const { episodeId } = await run(scenarioId, mode)
     return { episodeId }

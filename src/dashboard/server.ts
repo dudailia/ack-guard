@@ -11,6 +11,7 @@ import { Hono } from "hono"
 import { streamSSE } from "hono/streaming"
 import { headPath, type AuditLog } from "../audit/chain.js"
 import { listAttempts, replayAttempt } from "../audit/replay.js"
+import { trustedSignerFor } from "../audit/trust.js"
 import { verifyLog } from "../audit/verify.js"
 import { findLogs } from "../cli/util.js"
 import type { Decision } from "../policy/types.js"
@@ -36,11 +37,29 @@ export interface DashboardOptions {
   approvals?: Map<string, PendingApproval>
   liveInfo?: () => Record<string, unknown>
   root?: string
+  /** This machine's guard DID. Logs it signed are verified as pinned; other logs as "not pinned". */
+  operatorGuardDid?: string
 }
 
 export function createDashboard(opts: DashboardOptions) {
   const root = opts.root ?? process.cwd()
+  const port = opts.port ?? 4300
   const app = new Hono()
+
+  // Local-only API. Reject other Host headers (DNS rebinding) and cross-site
+  // writes: state-changing requests need a same-origin Origin header and JSON.
+  const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`])
+  const origins = new Set([...hosts].map((h) => `http://${h}`))
+  app.use("/api/*", async (c, next) => {
+    // @hono/node-server builds c.req.url from the Host header.
+    if (!hosts.has(c.req.header("host") ?? new URL(c.req.url).host)) return c.json({ error: "forbidden host" }, 403)
+    if (c.req.method !== "GET") {
+      if (!origins.has(c.req.header("origin") ?? "")) return c.json({ error: "cross-origin request refused" }, 403)
+      if (!(c.req.header("content-type") ?? "").startsWith("application/json")) return c.json({ error: "JSON body required" }, 415)
+    }
+    await next()
+  })
+  const signerFor = (log: string) => trustedSignerFor(log, { operatorGuardDid: opts.operatorGuardDid })
 
   /** Only logs the tool itself produced (under .data/ or results/) can be read. */
   const allowedLog = (requested?: string): string | undefined => {
@@ -99,7 +118,7 @@ export function createDashboard(opts: DashboardOptions) {
     const id = c.req.query("id")
     if (!log || !id) return c.json({ error: "log and id are required" }, 400)
     try {
-      return c.json(await replayAttempt(log, id))
+      return c.json({ ...(await replayAttempt(log, id, { expectedSignerDid: signerFor(log).did })), signerSource: signerFor(log).source })
     } catch (e) {
       return c.json({ error: (e as Error).message }, 404)
     }
@@ -108,7 +127,8 @@ export function createDashboard(opts: DashboardOptions) {
   app.get("/api/verify", async (c) => {
     const log = allowedLog(c.req.query("log"))
     if (!log) return c.json({ error: "unknown log" }, 404)
-    return c.json({ log: rel(log), ...(await verifyLog(log)) })
+    const trust = signerFor(log)
+    return c.json({ log: rel(log), signerSource: trust.source, ...(await verifyLog(log, { expectedSignerDid: trust.did })) })
   })
 
   /** Copy a log, flip one blocked decision to "allow" in the copy, and show that verification catches it. */
@@ -132,8 +152,9 @@ export function createDashboard(opts: DashboardOptions) {
       ? original.replace('"outcome":"deny"', '"outcome":"allow"')
       : original.replace('"detail":"', '"detail":"edited: ')
     writeFileSync(copy, lines.join("\n") + "\n")
-    const before = await verifyLog(log)
-    const after = await verifyLog(copy)
+    const trust = signerFor(log)
+    const before = await verifyLog(log, { expectedSignerDid: trust.did })
+    const after = await verifyLog(copy, { expectedSignerDid: trust.did })
     return c.json({ log: rel(log), tamperedSeq: idx, change, before: { ok: before.ok }, after })
   })
 
@@ -201,8 +222,8 @@ export function createDashboard(opts: DashboardOptions) {
 }
 
 export function startDashboard(opts: DashboardOptions) {
-  const app = createDashboard(opts)
   const port = opts.port ?? 4300
+  const app = createDashboard({ ...opts, port })
   const server = serve({ fetch: app.fetch, port, hostname: "127.0.0.1" })
   return { app, server, url: `http://localhost:${port}` }
 }

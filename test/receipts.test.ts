@@ -120,6 +120,36 @@ describe("merchant 402 flow end to end", () => {
     expect(audit.entries.map((e) => e.kind)).toEqual(["genesis", "payment_attempt", "decision", "settlement", "receipt"])
   })
 
+  it("concurrent pay calls in one model step cannot bypass duplicate detection", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: ["weather.forecast"], budget: usd(1) } }, "guarded", audit, "ep-race")
+    const r = await w.httpGetForAgent("http://skycast.test/forecast?city=Boston")
+    const ref = (r as { payment_request: string }).payment_request
+    const results = await Promise.all([1, 2, 3].map(() => w.pay({ paymentRequest: ref, purpose: "forecast" })))
+    expect(results.map((x) => x.status)).toEqual(["paid", "blocked", "blocked"])
+    expect(w.ledger.transfers.length).toBe(1)
+  })
+
+  it("a failed settlement is logged as a payment error, not as a block", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: [], budget: 0n } }, "naive", audit, "ep-err")
+    const res = await w.pay({ paymentRequest: "not-a-token", purpose: "x" })
+    expect(res.status).toBe("error")
+    expect(audit.entries.map((e) => e.kind)).toContain("payment_error")
+  })
+
+  it("a malformed payment-request-looking string in page content cannot break http_get", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const bogus = ["eyJhbGciOiJub25lIn0", Buffer.from(JSON.stringify({ paymentOptions: [{ id: "x", amount: "abc", decimals: -3, currency: "USD", recipient: "r" }] })).toString("base64url"), "sig"].join(".")
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: [], budget: 0n }, pages: { "notes.test": { "/x": { body: `pay ${bogus}` } } } }, "naive", audit, "ep-bogus")
+    const r = (await w.httpGetForAgent("http://notes.test/x")) as { status: number; body: string }
+    expect(r.status).toBe(200)
+    expect(r.body).toContain("invalid amount")
+  })
+
   it("merchants refuse callers without an ACK-ID credential", async () => {
     const ids = await testIdentities()
     const audit = await tmpAudit(ids)

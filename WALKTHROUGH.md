@@ -70,7 +70,9 @@ A `World` is one isolated episode: fresh network, ledger, merchants and spend hi
   - provenance
   - the agent's stated purpose, which is recorded but never used to decide
 
-  It then calls `evaluatePayment()`. The outcome is `allow`, `deny` or `needs_approval`. `needs_approval` goes to an approver: a dashboard button in the demo, and "deny by default" in the benchmark, reported as an escalation. If approved, the engine runs again with the approval as a fact, so an approval can never override a deny rule.
+  It then calls `evaluatePayment()`. The outcome is `allow`, `deny` or `needs_approval`.
+
+  Payments are serialized. The AI SDK can execute several tool calls from one model step concurrently, and without a queue two `pay` calls could both be evaluated against the same empty history and both pass the duplicate and budget rules. An independent review found this race, and a test now fires three concurrent payments at the same quote and expects one payment and two blocks. `needs_approval` goes to an approver: a dashboard button in the demo, and "deny by default" in the benchmark, reported as an escalation. If approved, the engine runs again with the approval as a fact, so an approval can never override a deny rule.
 
 ### 3.6 The policy engine (`src/policy/engine.ts`)
 
@@ -110,8 +112,11 @@ Money is `bigint` cents throughout, following ACK's BigInt convention.
 | Reorder entries | `prevHash` breaks |
 | Truncate the tail | The signed head points past the end |
 | Re-sign the whole chain with another key | Signatures fail against the pinned guard DID |
+| Replay an entry signature as the head | The head signature must carry the head marker |
 
-The genesis entry records the guard DID, owner and agent DIDs, the agent's DID document, the ControllerCredential and the full policy configuration in force, so a log is self-describing.
+**Pinning.** The expected signer must come from outside the log. `trustedSignerFor()` (`src/audit/trust.ts`) pins it to an explicit `--signer` DID or to this machine's guard key in `.data/keys.json`. Otherwise the result is reported as "chain intact, signer not pinned": the log is internally consistent, but that alone says nothing about who wrote it. Replay applies the same rule, because its identity and receipt re-checks trust the genesis entry, and the genesis entry is only as trustworthy as its signer.
+
+The genesis entry records the guard DID, owner and agent DIDs, the agent's DID document, the ControllerCredential, the receipt service DID and the full policy configuration in force, so a pinned log is self-describing.
 
 `replayAttempt()` rebuilds one attempt from the log alone:
 
@@ -174,7 +179,7 @@ It is a Hono server bound to 127.0.0.1 serving one page with no build step. It h
 - a human-approval queue
 - a tamper button, which flips a blocked decision to "allow" in a copy of the log and shows verification catching it
 
-Log paths are restricted to logs the tool itself wrote, and all model or attacker text is HTML-escaped.
+Log paths are restricted to logs the tool itself wrote, and all model or attacker text is HTML-escaped. The API refuses other Host headers (DNS rebinding) and cross-site writes: approving a payment needs a same-origin `Origin` header and a JSON body, and approval ids are random. Without that, any web page open in the same browser could approve a pending payment.
 
 ## 4. Running and verifying
 

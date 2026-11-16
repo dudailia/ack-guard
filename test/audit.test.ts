@@ -101,6 +101,41 @@ describe("hash-chained signed audit log", () => {
     expect(r.problems.every((p) => p.kind === "bad_signature" || p.kind === "bad_head_signature" || p.kind === "head_mismatch")).toBe(true)
   })
 
+  it("detects truncation even when an entry signature is replayed as the head", async () => {
+    const { ids, path } = await makeLog()
+    const ls = lines(path).slice(0, 4)
+    write(path, ls)
+    const last = JSON.parse(ls[3]!) as AuditEntry
+    writeFileSync(headPath(path), JSON.stringify({ seq: last.seq, hash: last.hash, sig: last.sig }))
+    const r = await verifyLog(path, { expectedSignerDid: ids.parties.guard.did })
+    expect(r.ok).toBe(false)
+    expect(r.problems.map((p) => p.kind)).toContain("bad_head_signature")
+  })
+
+  it("a log forged under a new key verifies only as 'not pinned' and fails once the signer is pinned", async () => {
+    const ids = await testIdentities()
+    const path = tmpLogPath()
+    const forged = new AuditLog(path, ids.parties.attacker)
+    await forged.append("genesis", { guardDid: ids.parties.attacker.did })
+    await forged.append("decision", { decision: { outcome: "allow" } })
+    const unpinned = await verifyLog(path)
+    expect(unpinned.ok).toBe(true)
+    expect(unpinned.pinned).toBe(false)
+    const pinned = await verifyLog(path, { expectedSignerDid: ids.parties.guard.did })
+    expect(pinned.ok).toBe(false)
+    expect(pinned.pinned).toBe(true)
+  })
+
+  it("detects a __proto__ key injected into a payload", async () => {
+    const { ids, path } = await makeLog()
+    const ls = lines(path)
+    ls[2] = ls[2]!.replace('"payload":{', '"payload":{"__proto__":{"injected":true},')
+    write(path, ls)
+    const r = await verifyLog(path, { expectedSignerDid: ids.parties.guard.did })
+    expect(r.ok).toBe(false)
+    expect(r.firstBadSeq).toBe(2)
+  })
+
   it("detects a deleted head file", async () => {
     const { ids, path } = await makeLog()
     writeFileSync(headPath(path), "{}")

@@ -25,6 +25,7 @@ export type EntryKind =
   | "approval"
   | "settlement"
   | "receipt"
+  | "payment_error"
   | "episode_end"
 
 export interface AuditEntry {
@@ -45,12 +46,14 @@ function sortDeep(v: unknown): unknown {
   if (typeof v === "bigint") return v.toString()
   if (Array.isArray(v)) return v.map(sortDeep)
   if (v && typeof v === "object") {
-    const out: Record<string, unknown> = {}
-    for (const k of Object.keys(v as object).sort()) {
-      const val = (v as Record<string, unknown>)[k]
-      if (val !== undefined) out[k] = sortDeep(val)
-    }
-    return out
+    // Object.fromEntries defines own properties, so a "__proto__" key is kept
+    // (and hashed) instead of silently changing the prototype.
+    return Object.fromEntries(
+      Object.keys(v as object)
+        .sort()
+        .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+        .map((k) => [k, sortDeep((v as Record<string, unknown>)[k])]),
+    )
   }
   return v
 }
@@ -111,9 +114,11 @@ export class AuditLog {
     const base = { seq, ts, kind, payload: cleanPayload, prevHash: this.prev }
     const hash = entryHash(base)
     const sig = await createJwt({ seq, hash }, { issuer: this.signer.did, signer: this.signer.signer }, { alg: this.signer.alg })
-    const entry: AuditEntry = { ...base, hash, sig }
-    appendFileSync(this.path, JSON.stringify(entry) + "\n")
     const head = await createJwt({ seq, hash, head: true }, { issuer: this.signer.did, signer: this.signer.signer }, { alg: this.signer.alg })
+    const entry: AuditEntry = { ...base, hash, sig }
+    // Both writes happen synchronously after signing, so a reader never sees
+    // a new entry without its matching head.
+    appendFileSync(this.path, JSON.stringify(entry) + "\n")
     writeFileSync(headPath(this.path), JSON.stringify({ seq, hash, sig: head }) + "\n")
     this.seq = seq
     this.prev = hash

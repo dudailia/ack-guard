@@ -2,7 +2,9 @@
 //   no id: list payment attempts in the log
 //   id:    reconstruct task, reasoning, policy rule, identity, receipt, verification
 import { listAttempts, replayAttempt } from "../audit/replay.js"
-import { c, defaultLog, flag, positional } from "./util.js"
+import { trustedSignerFor } from "../audit/trust.js"
+import { operatorGuardDid } from "./env.js"
+import { arg, c, defaultLog, flag, positional } from "./util.js"
 
 const path = defaultLog()
 const id = positional()[0]
@@ -16,7 +18,8 @@ if (!id) {
   }
   console.log(c.dim("\nReplay one: pnpm replay <attemptId> [--log path]"))
 } else {
-  const r = await replayAttempt(path, id)
+  const trust = trustedSignerFor(path, { explicit: arg("signer"), operatorGuardDid: await operatorGuardDid() })
+  const r = await replayAttempt(path, id, { expectedSignerDid: trust.did })
   if (flag("json")) {
     console.log(JSON.stringify(r, null, 2))
   } else {
@@ -56,12 +59,14 @@ if (!id) {
     }
     if (r.approval) console.log(`   human approval: ${r.approval.approved ? c.green("approved") : c.red("declined")} by ${r.approval.by}`)
     console.log(c.bold("\n6. Settlement and ACK receipt"))
+    if (r.error) console.log(`   ${c.red(`payment failed: ${r.error}`)}`)
     if (r.settlement) console.log(`   ledger tx ${r.settlement.tx.txId}: ${r.settlement.tx.amount} cents -> ${r.settlement.tx.to}`)
     else console.log("   no money moved")
     if (r.receipt) console.log(`   PaymentReceiptCredential re-verified (ACK verifyPaymentReceipt): ${ok(r.receipt.verifiedNow.ok)} ${c.dim(r.receipt.verifiedNow.error ?? `tx ${r.receipt.verifiedNow.txId}`)}`)
     console.log(c.bold("\n7. Log integrity"))
     console.log(`   whole log (${r.chain.entries} entries): ${ok(r.chain.ok)}${r.chain.ok ? "" : c.red(` first bad seq ${r.chain.firstBadSeq}`)}`)
     console.log(`   entries used in this replay (${r.chain.relatedSeqs.length}): ${ok(r.chain.relatedEntriesIntact)}`)
+    console.log(`   signer: ${r.chain.pinned ? c.green(trust.source) : c.yellow(`${trust.source}. Identity and receipt checks above rely on the log's own genesis entry; pass --signer <guard DID> to pin.`)}`)
     console.log(c.bold(`\nFinal outcome: ${r.finalOutcome}\n`))
   }
 }

@@ -23,7 +23,7 @@ That one command generates local keys, starts the dashboard at http://localhost:
 | `pnpm demo` | Dashboard plus live episodes (above) |
 | `pnpm redteam --runs 3` | Runs every attack and benign task against both agents (qwen3:8b by default; `--model scripted` runs offline; `--model claude-...` needs `ANTHROPIC_API_KEY` in `.env`) |
 | `pnpm replay [attemptId]` | Lists payment attempts in the newest log, or rebuilds one: task, agent steps, the policy rule that decided, identity, receipt, fresh verification |
-| `pnpm verify-log [--log path]` | Verifies the hash chain, every signature and the signed head; prints the first tampered entry |
+| `pnpm verify-log [--log path] [--signer did]` | Verifies the hash chain, every signature and the signed head against the expected guard key (this machine's, or `--signer`); prints the first tampered entry. A log signed by any other key is reported as "not pinned" |
 | `pnpm report` | Regenerates the results section below from `results/*/episodes.jsonl` |
 | `pnpm check` | Typecheck, tests, em-dash check and secret scan |
 
@@ -49,7 +49,7 @@ flowchart LR
 1. **Identity (ACK-ID).** The owner has a `did:key`. The agent has a `did:web` whose DID document names the owner as `controller`, plus an owner-signed `ControllerCredential`. Merchants verify it before quoting a price; the guard verifies it before every payment.
 2. **Paid APIs (ACK-Pay).** Each merchant answers an unpaid call with HTTP 402 and a payment request signed by its DID (`createSignedPaymentRequest`). After settlement on the sandbox ledger, the receipt service checks the transfer against the signed option and issues a `PaymentReceiptCredential`. The merchant accepts it only after `verifyPaymentReceipt` passes.
 3. **The guard.** The agent can only pay through `pay()`. In the guarded agent, `pay()` first collects verified facts (signature, identity, which 402 response the request came from) and then runs a pure policy function. The LLM never sees or edits the policy, and nothing the agent writes can change a decision.
-4. **Audit.** Every task, agent step, payment attempt, decision, approval, settlement and receipt is appended to a JSONL log. Each entry carries the hash of the previous one and a JWS signature from the guard's DID, and a signed head file catches truncation.
+4. **Audit.** Every task, agent step, payment attempt, decision, approval, settlement and receipt is appended to a JSONL log. Each entry carries the hash of the previous one and a JWS signature from the guard's DID, and a signed head file catches truncation. Verification pins the expected guard DID from outside the log (this machine's key, or `--signer`), because a forger could otherwise write a whole new log under their own key.
 
 ### The policy rules
 
@@ -147,6 +147,7 @@ What this demo does not show:
 - **did:web is resolved from a local cache.** In production it resolves over HTTPS.
 - **The policy only knows what the operator registers.** Price lists, payout accounts and capability tags are configuration. A compromised registry defeats the guard.
 - **In-policy over-purchasing is not blocked**, only bounded by the task budget (see `DC-05`, `HI-05`). Closing that gap needs intent binding at the level of the exact resource (quantity- and parameter-scoped needs).
+- **Trust in a log starts from its guard DID.** The DID that signed each recorded run is printed in the results; pin it with `--signer`. In production that DID would be published out of band (or the head anchored externally), not read from the same repository.
 - **The log proves integrity, not completeness.** Something that bypasses the guard entirely would not be logged. Anchoring the signed head externally, or co-signing with the merchant, would close more of that.
 - **Blocked agents sometimes give up.** After a payment is refused, the small model often stops instead of finishing the legitimate part of the task. The results table reports this as "legit task still completed during an attack".
 

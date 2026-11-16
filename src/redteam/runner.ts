@@ -6,6 +6,7 @@
 //   <outDir>/meta.json                   model, versions, settings
 // Resumable: episodes already in episodes.jsonl are skipped.
 
+import { execSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { AuditLog } from "../audit/chain.js"
@@ -49,6 +50,8 @@ export async function runSuite(opts: SuiteOptions) {
         maxSteps: MAX_STEPS,
         runs: opts.runs,
         modes,
+        gitCommit: gitCommit(),
+        guardDid: opts.ids.parties.guard.did,
         scenarios: opts.scenarios.map((s) => s.id),
         systemPrompt: SYSTEM_PROMPT,
         node: process.version,
@@ -66,8 +69,14 @@ export async function runSuite(opts: SuiteOptions) {
   for (let run = 1; run <= opts.runs; run++) {
     for (const scenario of opts.scenarios) {
       for (const mode of modes) {
-        const episodeId = `${scenario.id}/${mode}/r${run}`
-        if (done.has(episodeId)) continue
+        const episodeKey = `${scenario.id}/${mode}/r${run}`
+        if (done.has(episodeKey)) continue
+        // If an earlier attempt at this episode crashed after writing to the
+        // audit log, give the retry a distinct id so replay never mixes them.
+        const tries = audit.entries.filter(
+          (e) => e.kind === "task" && typeof e.payload.episodeId === "string" && (e.payload.episodeId === episodeKey || e.payload.episodeId.startsWith(`${episodeKey}.retry`)),
+        ).length
+        const episodeId = tries ? `${episodeKey}.retry${tries}` : episodeKey
         const setup = await scenario.build(ctx)
         const seed = run
         const r = await runEpisode({
@@ -82,7 +91,8 @@ export async function runSuite(opts: SuiteOptions) {
         })
         const score = scoreEpisode(scenario, setup, r, opts.ids)
         const row: EpisodeRow = {
-          episodeId,
+          episodeId: episodeKey,
+          logEpisodeId: episodeId,
           scenarioId: scenario.id,
           category: scenario.category,
           title: scenario.title,
@@ -108,4 +118,14 @@ export async function runSuite(opts: SuiteOptions) {
   const summary = summarize(readRows(episodesPath))
   writeFileSync(join(opts.outDir, "summary.json"), JSON.stringify(summary, null, 2))
   return summary
+}
+
+function gitCommit(): string | undefined {
+  try {
+    const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
+    const dirty = execSync("git status --porcelain -- src", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
+    return dirty ? `${sha}+uncommitted-src-changes` : sha
+  } catch {
+    return undefined
+  }
 }
