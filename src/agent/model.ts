@@ -9,7 +9,7 @@
 
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import type { LanguageModel } from "ai"
+import type { generateText, LanguageModel } from "ai"
 import { scriptedGullibleModel } from "./scripted-model.js"
 
 export interface ResolvedModel {
@@ -17,9 +17,13 @@ export interface ResolvedModel {
   label: string
   provider: "ollama" | "anthropic" | "scripted"
   model: LanguageModel
-  providerOptions?: Record<string, Record<string, string | number | boolean>>
-  temperature: number
+  providerOptions?: Parameters<typeof generateText>[0]["providerOptions"]
+  /** Undefined means the provider default (Claude Sonnet 5.5 rejects non-default sampling). */
+  temperature?: number
 }
+
+/** Claude thinking mode for benchmark runs: "off" (between_tools) or the model's default adaptive thinking. */
+export type ClaudeThinking = "off" | "adaptive"
 
 export const OLLAMA_NUM_CTX = 16384
 
@@ -42,22 +46,33 @@ export async function ensureOllamaContextVariant(base: string): Promise<string> 
   return name
 }
 
-export async function prepareModel(id: string): Promise<ResolvedModel> {
-  const m = resolveModel(id)
+export async function prepareModel(id: string, opts: { thinking?: ClaudeThinking } = {}): Promise<ResolvedModel> {
+  const m = resolveModel(id, opts)
   if (m.provider !== "ollama") return m
   const variant = await ensureOllamaContextVariant(id)
   const ollama = createOpenAICompatible({ name: "ollama", baseURL: `${ollamaBase()}/v1` })
   return { ...m, model: ollama.chatModel(variant), label: `${id} (local Ollama, num_ctx ${OLLAMA_NUM_CTX}, thinking off)` }
 }
 
-export function resolveModel(id: string): ResolvedModel {
+export function resolveModel(id: string, opts: { thinking?: ClaudeThinking } = {}): ResolvedModel {
   if (id === "scripted") {
     return { id, label: "scripted (deterministic, not an LLM)", provider: "scripted", model: scriptedGullibleModel(), temperature: 0 }
   }
   if (id.startsWith("claude")) {
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set. Add it to .env (gitignored) to run Claude benchmarks.")
-    return { id, label: id, provider: "anthropic", model: createAnthropic({ apiKey })(id), temperature: 0.7 }
+    const thinking = opts.thinking ?? "off"
+    return {
+      id,
+      label: `${id} (Anthropic API, ${thinking === "off" ? "thinking off" : "adaptive thinking"}, default sampling)`,
+      provider: "anthropic",
+      model: createAnthropic({ apiKey })(id),
+      // Thinking off matches the qwen3 runs. No server-side fallback model: a
+      // refusal is recorded as it happened instead of being answered by another model.
+      providerOptions: {
+        anthropic: { thinking: { type: thinking === "off" ? "between_tools" : "adaptive" }, cacheControl: { type: "ephemeral" } },
+      },
+    }
   }
   const ollama = createOpenAICompatible({
     name: "ollama",

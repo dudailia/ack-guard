@@ -98,10 +98,10 @@ describe("policy: the daily cap holds across episodes that share the agent's spe
     const store = new SpendStore()
     let total = 0n
     for (let ep = 0; ep < 3; ep++) {
-      // Each task has a big budget; history is $1.50 and needs approval, so approve it.
+      // Each task has a big budget and asks for 8 histories; history is $1.50 and needs approval, so approve it.
       const w = new World(
         ids,
-        { task: { id: `t${ep}`, prompt: "", needs: ["weather.history"], budget: usd(20) } },
+        { task: { id: `t${ep}`, prompt: "", needs: Array(8).fill("weather.history"), budget: usd(20) } },
         "guarded",
         audit,
         `ep${ep}`,
@@ -331,10 +331,12 @@ describe("review 3: reported numbers are backed by the signed log", () => {
     expect(ok.problems).toEqual([])
     expect(ok.episodesChecked).toBe(6)
 
-    // Edit a row: claim the guarded DC-05 attack failed.
+    // Edit a row: claim the naive DC-05 attack failed.
     const epPath = join(outDir, "episodes.jsonl")
     const original = readFileSync(epPath, "utf8")
-    writeFileSync(epPath, original.replace(/("scenarioId":"DC-05".*?"mode":"guarded".*?"attackSucceeded":)true/, "$1false"))
+    const forged = original.replace(/("scenarioId":"DC-05".*?"mode":"naive".*?"attackSucceeded":)true/, "$1false")
+    expect(forged).not.toBe(original)
+    writeFileSync(epPath, forged)
     const edited = await verifyRun(outDir)
     expect(edited.ok).toBe(false)
     expect(edited.problems.join(" ")).toMatch(/attackSucceeded/)

@@ -3,9 +3,10 @@
 // and results/RESULTS.md from recorded episodes.jsonl files. Nothing here is
 // typed by hand: every number comes from the recorded runs.
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { genesisGuardDid } from "../src/audit/trust.js"
+import { combinedRows, defaultRuns, patchesOf, readMeta } from "../src/redteam/combine.js"
 import { readRows, summarize, type Cell, type EpisodeRow } from "../src/redteam/summary.js"
 import { verifyRun, type RunVerification } from "../src/redteam/verify-run.js"
 
@@ -20,33 +21,14 @@ function args(name: string): string[] {
   return out
 }
 
-/** Latest complete-looking run per model directory. */
-function defaultRuns(): string[] {
-  const base = "results"
-  if (!existsSync(base)) return []
-  const runs: string[] = []
-  for (const model of readdirSync(base)) {
-    const mdir = join(base, model)
-    if (!statSync(mdir).isDirectory()) continue
-    const started = (r: string) => (existsSync(join(r, "meta.json")) ? String(JSON.parse(readFileSync(join(r, "meta.json"), "utf8")).startedAt ?? "") : "")
-    const candidates = readdirSync(mdir)
-      .map((r) => join(mdir, r))
-      .filter((r) => existsSync(join(r, "episodes.jsonl")))
-      .filter((r) => !existsSync(join(r, "meta.json")) || !JSON.parse(readFileSync(join(r, "meta.json"), "utf8")).superseded)
-      .sort((a, b) => started(a).localeCompare(started(b)))
-    if (candidates.length) runs.push(candidates[candidates.length - 1]!)
-  }
-  return runs
-}
-
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`
 const money = (c: number) => `$${(c / 100).toFixed(2)}`
 const ci = (c: Cell) => `${pct(c.ci95[0])} to ${pct(c.ci95[1])}`
 const frac = (c: Cell) => `${c.successes}/${c.n} (${pct(c.rate)})`
 
-function section(runDir: string, verification: RunVerification): string {
-  const rows = readRows(join(runDir, "episodes.jsonl"))
-  const meta = existsSync(join(runDir, "meta.json")) ? JSON.parse(readFileSync(join(runDir, "meta.json"), "utf8")) : {}
+function section(runDir: string, verification: RunVerification, patches: { dir: string; v: RunVerification }[]): string {
+  const rows = combinedRows(runDir, patches.map((p) => p.dir))
+  const meta = readMeta(runDir)
   const s = summarize(rows)
   const expectedEpisodes = meta.scenarios && meta.modes && meta.runs ? meta.scenarios.length * meta.modes.length * meta.runs : rows.length
   const complete = rows.length >= expectedEpisodes
@@ -66,15 +48,28 @@ function section(runDir: string, verification: RunVerification): string {
   lines.push(
     `${meta.scenarios?.length ?? "?"} scenarios (${(meta.scenarios ?? []).filter((id: string) => !id.startsWith("B-")).length} attacks, ${(meta.scenarios ?? []).filter((id: string) => id.startsWith("B-")).length} benign) x 2 agents x ${meta.runs ?? "?"} runs = ${rows.length} episodes` +
       `${complete ? "" : ` (INCOMPLETE: ${rows.length} of ${expectedEpisodes} recorded)`}, recorded ${date}. ` +
-      `Temperature ${meta.temperature ?? "?"}, max ${meta.maxSteps ?? "?"} agent steps, seed = run number (the same seed for both agents in a run). ` +
+      `Temperature ${meta.temperature ?? "?"}, max ${meta.maxSteps ?? "?"} agent steps, ` +
+      (meta.provider === "anthropic" ? "no seed (the Anthropic API has none). " : "seed = run number (the same seed for both agents in a run). ") +
       `Source: \`${runDir}/\`. Audit log ${meta.headHash ? `head hash \`${meta.headHash}\` (seq ${meta.headSeq}), ` : ""}signed by guard DID \`${meta.guardDid ?? genesisGuardDid(join(runDir, "audit.jsonl")) ?? "?"}\`` +
       `${meta.gitCommit ? `, code at commit \`${meta.gitCommit}\`` : ""}.${errors ? ` ${errors} episode(s) ended with a model or tool error and are counted as they ended.` : ""}`,
   )
   lines.push("")
+  for (const p of patches) {
+    const pm = readMeta(p.dir)
+    lines.push(
+      `**Partial re-run:** ${pm.scenarios.length} scenario(s) (${pm.scenarios.map((x: string) => `\`${x}\``).join(", ")}) were re-run with both agents, ${pm.runs} runs each, ` +
+        `at commit \`${pm.gitCommit}\` on ${String(pm.startedAt ?? "").slice(0, 10)}, and their rows replace the base run's rows above. Reason: ${pm.patchReason}. ` +
+        `Source: \`${p.dir}/\`, audit log head hash \`${pm.headHash}\`, guard DID \`${pm.guardDid}\`. The other scenarios are from the base run.`,
+    )
+    lines.push("")
+  }
+  const checked = [{ dir: runDir, v: verification }, ...patches]
   lines.push(
-    `**Checked against the signed log:** all ${verification.episodesChecked} scored rows were re-derived from the audit log's signed entries and match; ` +
-      `the log verifies against guard DID \`${verification.pinnedTo}\` and ends at head hash \`${verification.headHash}\`. ` +
-      "These values are recorded in this repository, so for independent assurance compare them with a separately published copy.",
+    `**Checked against the signed log:** ` +
+      checked
+        .map(({ dir, v }) => `all ${v.episodesChecked} rows of \`${dir}\` were re-derived from its audit log's signed entries and match (guard DID \`${v.pinnedTo}\`, head hash \`${v.headHash}\`)`)
+        .join("; ") +
+      ". These values are recorded in this repository, so for independent assurance compare them with a separately published copy.",
   )
   lines.push("")
   lines.push("| | Without guard (naive) | With ACK Guard |")
@@ -125,6 +120,20 @@ function section(runDir: string, verification: RunVerification): string {
     lines.push("**Guarded failures:** none in this run.")
     lines.push("")
   }
+  // Keep the history: results the re-runs replaced, where the guard had failed.
+  for (const p of patches) {
+    const ids = new Set<string>(readMeta(p.dir).scenarios ?? [])
+    const before = summarize(readRows(join(runDir, "episodes.jsonl")).filter((r) => ids.has(r.scenarioId)))
+    const after = summarize(readRows(join(p.dir, "episodes.jsonl")))
+    for (const old of before.scenarios.filter((x) => x.category !== "benign" && x.guarded.successes > 0)) {
+      const now = after.scenarios.find((x) => x.id === old.id)
+      lines.push(
+        `**Earlier result, replaced by the re-run:** \`${old.id}\` beat the guard in ${old.guarded.successes}/${old.guarded.n} runs at commit \`${meta.gitCommit}\` (\`${runDir}/\`); ` +
+          `after the change it beat the guard in ${now ? `${now.guarded.successes}/${now.guarded.n}` : "?"} runs.`,
+      )
+      lines.push("")
+    }
+  }
   const naiveZero = s.scenarios.filter((x) => x.category !== "benign" && x.naive.successes === 0)
   if (naiveZero.length) {
     lines.push(
@@ -141,7 +150,7 @@ if (!runs.length) {
   process.exit(1)
 }
 const sections: string[] = []
-for (const run of runs) {
+async function verified(run: string): Promise<RunVerification> {
   const v = await verifyRun(run)
   writeFileSync(join(run, "verification.json"), JSON.stringify({ ...v, checkedAt: new Date().toISOString() }, null, 2))
   if (!v.ok) {
@@ -149,7 +158,26 @@ for (const run of runs) {
     for (const p of v.problems.slice(0, 15)) console.error(`  ${p}`)
     process.exit(1)
   }
-  sections.push(section(run, v))
+  return v
+}
+for (const run of runs) {
+  const v = await verified(run)
+  const patches: { dir: string; v: RunVerification }[] = []
+  for (const dir of patchesOf(run)) patches.push({ dir, v: await verified(dir) })
+  sections.push(section(run, v, patches))
+  // The combined view the dashboard shows by default.
+  const cur = join(run, "..", "current")
+  mkdirSync(cur, { recursive: true })
+  const meta = readMeta(run)
+  writeFileSync(join(cur, "summary.json"), JSON.stringify(summarize(combinedRows(run, patches.map((p) => p.dir))), null, 2))
+  writeFileSync(
+    join(cur, "meta.json"),
+    JSON.stringify({ ...meta, combined: true, base: run, patches: patches.map((p) => ({ dir: p.dir, scenarios: readMeta(p.dir).scenarios, gitCommit: readMeta(p.dir).gitCommit, reason: readMeta(p.dir).patchReason })) }, null, 2),
+  )
+  writeFileSync(
+    join(cur, "verification.json"),
+    JSON.stringify({ ok: true, combined: true, episodesChecked: v.episodesChecked + patches.reduce((a, p) => a + p.v.episodesChecked, 0), sources: [{ dir: run, ...v }, ...patches.map((p) => ({ dir: p.dir, ...p.v }))] }, null, 2),
+  )
 }
 const body = sections.join("\n\n")
 const block = `${START}\n\n${body}\n\n${END}`

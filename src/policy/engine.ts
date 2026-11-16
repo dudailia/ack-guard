@@ -15,6 +15,7 @@
 import { formatAmount } from "../money.js"
 import type {
   Decision,
+  PaidRecord,
   PaymentFacts,
   PolicyConfig,
   RegisteredEndpoint,
@@ -33,7 +34,7 @@ export const RULE_TITLES: Record<RuleId, string> = {
   RECIPIENT_BINDING: "Recipient is the merchant's registered payout account",
   PRICE_BINDING: "Amount and currency match the registered price for the endpoint",
   PURPOSE_BINDING: "Endpoint capability is one the task declared it needs",
-  DUPLICATE_CHARGE: "Not a repeat payment for the same request or URL in this task",
+  DUPLICATE_CHARGE: "Not a repeat purchase: same request, or more of a capability from one merchant than the task asked for",
   PER_PAYMENT_CAP: "Amount is within the per-payment cap",
   TASK_BUDGET: "Cumulative task spend stays within the task budget",
   DAILY_CAP: "Rolling 24h spend stays within the daily cap",
@@ -54,6 +55,12 @@ export const RULE_ORDER: RuleId[] = [
   "DAILY_CAP",
   "HUMAN_APPROVAL",
 ]
+
+/** The registered capability behind a merchant's endpoint, if any (used to record what was bought). */
+export function capabilityFor(config: PolicyConfig, merchantDid: string | undefined, path: string | undefined): string | undefined {
+  const m = config.merchants.find((x) => x.did === merchantDid)
+  return m?.endpoints.find((e) => e.path === path)?.capability
+}
 
 export function evaluatePayment(
   facts: PaymentFacts,
@@ -159,29 +166,36 @@ export function evaluatePayment(
         : `capability ${endpoint.capability} is not among the task's declared needs [${task.needs.join(", ")}]`,
     )
 
-  // 8. Duplicate charge
+  // 8. Duplicate charge. Keyed on what is bought, not on the URL: the
+  // merchant DID, the registered capability and the task. A task that needs a
+  // capability more than once lists it that many times in its needs.
   if (!facts.requestSignature.ok) add("DUPLICATE_CHARGE", null, "no verified request")
   else {
     const reqId = facts.requestSignature.requestId
     const sameRequest = history.payments.find((p) => p.paymentRequestId === reqId)
-    const sameUrl = facts.provenance.url
-      ? history.payments.find(
-          (p) =>
-            p.taskId === task.id &&
-            p.url === facts.provenance.url &&
-            p.merchantDid === issuer &&
-            now - p.ts <= config.limits.duplicateWindowMs,
-        )
-      : undefined
-    add(
-      "DUPLICATE_CHARGE",
-      !sameRequest && !sameUrl,
-      sameRequest
-        ? `payment request ${reqId} was already paid`
-        : sameUrl
-          ? `${facts.provenance.url} was already paid in this task`
-          : "no prior payment for this request or URL",
-    )
+    const inWindow = (p: PaidRecord) => p.taskId === task.id && p.merchantDid === issuer && now - p.ts <= config.limits.duplicateWindowMs
+    let detail: string
+    let repeat = false
+    if (sameRequest) {
+      repeat = true
+      detail = `payment request ${reqId} was already paid`
+    } else if (endpoint) {
+      const cap = endpoint.capability
+      const allowed = Math.max(1, task.needs.filter((n) => n === cap).length)
+      // Records without a capability (older history) still match on the URL.
+      const bought = history.payments.filter(
+        (p) => inWindow(p) && (p.capability ? p.capability === cap : !!facts.provenance.url && p.url === facts.provenance.url),
+      ).length
+      repeat = bought >= allowed
+      detail = repeat
+        ? `${cap} from ${merchant?.displayName ?? issuer} was already bought ${bought} time(s) in this task; the task asks for ${allowed}`
+        : `${cap} purchase ${bought + 1} of ${allowed} the task asks for`
+    } else {
+      const sameUrl = !!facts.provenance.url && history.payments.some((p) => inWindow(p) && p.url === facts.provenance.url)
+      repeat = sameUrl
+      detail = sameUrl ? `${facts.provenance.url} was already paid in this task` : "no prior payment for this request or URL"
+    }
+    add("DUPLICATE_CHARGE", !repeat, detail)
   }
 
   // 9-11. Amount limits

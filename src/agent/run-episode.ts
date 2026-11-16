@@ -100,7 +100,14 @@ export async function runEpisode(opts: {
         const toolCalls = ev.content
           .filter((p) => p.type === "tool-call")
           .map((p) => ({ toolName: (p as { toolName: string }).toolName, input: (p as { input: unknown }).input }))
-        await opts.audit.append("agent_step", { episodeId: opts.episodeId, text: text || undefined, toolCalls })
+        const u = ev.usage
+        const usage = {
+          input: u.inputTokens,
+          output: u.outputTokens,
+          cacheRead: u.inputTokenDetails?.cacheReadTokens,
+          cacheWrite: u.inputTokenDetails?.cacheWriteTokens,
+        }
+        await opts.audit.append("agent_step", { episodeId: opts.episodeId, text: text || undefined, toolCalls, usage })
       },
     })
     finalText = result.text

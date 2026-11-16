@@ -15,7 +15,7 @@ import { merchantSpecs, type MerchantKey } from "./merchants/catalog.js"
 import { createMerchantApp, type MerchantBehavior, type MerchantStats } from "./merchants/framework.js"
 import { formatAmount, parseSubunits } from "./money.js"
 import { buildPolicyConfig } from "./policy/config.js"
-import { evaluatePayment } from "./policy/engine.js"
+import { capabilityFor, evaluatePayment } from "./policy/engine.js"
 import { SpendStore } from "./policy/spend-store.js"
 import type { Decision, PaymentFacts, PolicyConfig, SpendHistory, TaskSpec } from "./policy/types.js"
 import { checkReceipt, ReceiptService } from "./receipts/receipt-service.js"
@@ -305,6 +305,7 @@ export class World {
       url: facts.provenance.url,
       paymentRequestId: tx.paymentRequestId,
       merchantDid: facts.requestSignature.issuer!,
+      capability: capabilityFor(this.policy, facts.requestSignature.issuer, facts.provenance.path),
     })
     await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
 
@@ -446,23 +447,17 @@ function factsForLog(f: PaymentFacts) {
 }
 
 /**
- * Canonical form of a URL, used for fetching and as the key for provenance
- * and duplicate detection:
- * - only http and https are accepted, and both become http
- * - the port is dropped (sandbox hosts are routed by name, so ports are aliases)
- * - the host is lowercased, the fragment is dropped
- * - query parameters are decoded and sorted
- *
- * So "HTTP://SkyCast.test:8080/forecast?b=2&a=1#x" and
- * "skycast.test/forecast?a=1&b=2" are the same purchase. A different
- * parameter set (an added "refresh=1", or a value in different letter case)
- * is still a different URL to the guard; see DC-05.
+ * Canonical form of a URL, used for provenance, receipts and the HTTP request
+ * itself, so that trivial variants of one URL are one URL:
+ *   - scheme, port, credentials and fragment are dropped (sandbox hosts are http only)
+ *   - host, path and query parameter names are lower-cased
+ *   - a trailing slash on the path is dropped
+ *   - query parameters are sorted, and tracking parameters (utm_*, gclid,
+ *     fbclid, ...) are removed
+ * Parameter values keep their case, because a value can be case-significant
+ * (text to translate). Duplicate detection does not depend on the URL
+ * anyway: it counts purchases per merchant, capability and task.
  */
-/** A live task instance id: unique per session and per episode, since the spend history outlives a session. */
-export function taskInstanceId(base: string, sessionId: string, n: number): string {
-  return `${base}#${sessionId}-${n}`
-}
-
 export function normalizeUrl(raw: string): string {
   const s = raw.trim()
   const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `http://${s}`)
@@ -472,8 +467,23 @@ export function normalizeUrl(raw: string): string {
   u.username = ""
   u.password = ""
   u.hash = ""
-  const params = [...u.searchParams.entries()].sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)))
+  u.pathname = u.pathname.toLowerCase().replace(/\/+$/, "") || "/"
+  const params = [...u.searchParams.entries()]
+    .map(([k, v]) => [k.toLowerCase(), v] as [string, string])
+    .filter(([k]) => !isTrackingParam(k))
+    .sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)))
   u.search = ""
   for (const [k, v] of params) u.searchParams.append(k, v)
   return u.toString()
 }
+
+const TRACKING_PARAMS = new Set(["gclid", "dclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "_ga", "_gl", "yclid", "igshid", "ref_src"])
+function isTrackingParam(k: string): boolean {
+  return k.startsWith("utm_") || TRACKING_PARAMS.has(k)
+}
+
+/** A live task instance id: unique per session and per episode, since the spend history outlives a session. */
+export function taskInstanceId(base: string, sessionId: string, n: number): string {
+  return `${base}#${sessionId}-${n}`
+}
+

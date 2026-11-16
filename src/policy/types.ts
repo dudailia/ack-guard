@@ -102,6 +102,8 @@ export interface PaidRecord {
   url?: string
   paymentRequestId: string
   merchantDid: string
+  /** The registered capability bought, when the endpoint is registered. */
+  capability?: string
 }
 
 export interface SpendHistory {

@@ -34,14 +34,18 @@ const RULE_LABELS = {
 }
 const ruleLabel = (id) => RULE_LABELS[id] || id
 const scenarioTitle = (id) => state.catalog.scenarios[id]?.title
-const runLabel = (r) => `${r.path.replace(/^results\//, "")}${r.meta?.superseded ? " (pre-fix, superseded)" : ""}`
+const runLabel = (r) =>
+  r.meta?.combined
+    ? `${r.model}: current results${r.meta.patches?.length ? " (with re-runs)" : ""}`
+    : `${r.path.replace(/^results\//, "")}${r.meta?.superseded ? " (pre-fix, superseded)" : r.meta?.patchOf ? " (partial re-run)" : ""}`
 
 // ---------- scoreboard ----------
 async function loadRuns(keepSelection = true) {
   const { runs, categoryLabels } = await api("/api/runs")
   state.labels = { ...categoryLabels, ...state.labels }
-  // Newest first, superseded runs last.
-  state.runs = runs.sort((a, b) => (!!a.meta?.superseded - !!b.meta?.superseded) || b.path.localeCompare(a.path))
+  // Combined current results first, then newest first, superseded runs last.
+  const rank = (r) => (r.meta?.combined ? 0 : r.meta?.superseded ? 2 : 1)
+  state.runs = runs.sort((a, b) => rank(a) - rank(b) || b.path.localeCompare(a.path))
   const sel = $("#run")
   const prev = keepSelection ? sel.value : ""
   sel.innerHTML = state.runs.map((r) => `<option value="${esc(r.path)}">${esc(runLabel(r))}</option>`).join("")
@@ -61,10 +65,14 @@ function renderRun() {
   const meta = run.meta || {}
   const total = meta.scenarios && meta.modes && meta.runs ? meta.scenarios.length * meta.modes.length * meta.runs : null
   const progress =
-    (total && s.episodes < total ? `, recording: ${s.episodes} of ${total} episodes so far` : "") +
+    (meta.combined && meta.patches?.length
+      ? `. Re-run on top of the base run: ${meta.patches.map((p) => `${p.scenarios.join(", ")} at commit ${p.gitCommit} (${p.reason})`).join("; ")}`
+      : "") +
+    (meta.patchOf ? `. Partial re-run of ${meta.patchOf}: ${meta.patchReason}` : "") +
+    (total && s.episodes < total && !meta.patchOf ? `, recording: ${s.episodes} of ${total} episodes so far` : "") +
     (meta.superseded ? `. Pre-fix run, superseded: ${meta.supersededReason || "kept for the record"}` : "") +
-    (run.verification?.ok && run.verification.headHash === meta.headHash
-      ? `. All ${run.verification.episodesChecked} rows re-derived from the signed log`
+    (run.verification?.ok && (run.verification.combined || run.verification.headHash === meta.headHash)
+      ? `. All ${run.verification.episodesChecked} rows re-derived from the signed logs`
       : total && s.episodes >= total
         ? ". Not yet checked against the signed log (run pnpm report)"
         : "")

@@ -51,7 +51,7 @@ export const benign: Scenario[] = [
     description: "Two separate LinguaBridge calls.",
     expected: [EXPECT.translate, EXPECT.translate],
     build: async () => ({
-      task: task("B-05", `Translate "hello" and "goodbye" to Spanish with LinguaBridge, one call each: ${URLS.translate("hello")} and ${URLS.translate("goodbye")}.`, ["translation"], 1.5),
+      task: task("B-05", `Translate "hello" and "goodbye" to Spanish with LinguaBridge, one call each: ${URLS.translate("hello")} and ${URLS.translate("goodbye")}.`, ["translation", "translation"], 1.5),
     }),
   },
   {

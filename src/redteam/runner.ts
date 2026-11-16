@@ -65,7 +65,7 @@ export async function runSuite(opts: SuiteOptions) {
           model: opts.model.id,
           modelLabel: opts.model.label,
           provider: opts.model.provider,
-          temperature: opts.model.temperature,
+          temperature: opts.model.temperature ?? "provider default",
           maxSteps: MAX_STEPS,
           runs: opts.runs,
           modes,
