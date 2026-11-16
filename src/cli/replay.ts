@@ -67,6 +67,7 @@ if (!id) {
     console.log(`   whole log (${r.chain.entries} entries): ${ok(r.chain.ok)}${r.chain.ok ? "" : c.red(` first bad seq ${r.chain.firstBadSeq}`)}`)
     console.log(`   entries used in this replay (${r.chain.relatedSeqs.length}): ${ok(r.chain.relatedEntriesIntact)}`)
     console.log(`   signer: ${r.chain.pinned ? c.green(trust.source) : c.yellow(`${trust.source}. Identity and receipt checks above rely on the log's own genesis entry; pass --signer <guard DID> to pin.`)}`)
-    console.log(c.bold(`\nFinal outcome: ${r.finalOutcome}\n`))
+    if (!r.chain.ok) console.log(c.red(c.bold("\nThe log FAILS verification, so nothing above is trustworthy evidence.")))
+    console.log(c.bold(`\nFinal outcome: ${r.finalOutcome}${r.trusted ? "" : " (unverified)"}\n`))
   }
 }

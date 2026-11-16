@@ -30,6 +30,7 @@ function defaultRuns(): string[] {
     const candidates = readdirSync(mdir)
       .map((r) => join(mdir, r))
       .filter((r) => existsSync(join(r, "episodes.jsonl")))
+      .filter((r) => !existsSync(join(r, "meta.json")) || !JSON.parse(readFileSync(join(r, "meta.json"), "utf8")).superseded)
       .sort()
     if (candidates.length) runs.push(candidates[candidates.length - 1]!)
   }
@@ -63,7 +64,7 @@ function section(runDir: string): string {
     `${meta.scenarios?.length ?? "?"} scenarios (${(meta.scenarios ?? []).filter((id: string) => !id.startsWith("B-")).length} attacks, ${(meta.scenarios ?? []).filter((id: string) => id.startsWith("B-")).length} benign) x 2 agents x ${meta.runs ?? "?"} runs = ${rows.length} episodes` +
       `${complete ? "" : ` (INCOMPLETE: ${rows.length} of ${expectedEpisodes} recorded)`}, recorded ${date}. ` +
       `Temperature ${meta.temperature ?? "?"}, max ${meta.maxSteps ?? "?"} agent steps, seed = run number (the same seed for both agents in a run). ` +
-      `Source: \`${runDir}/\`, audit log signed by guard DID \`${meta.guardDid ?? genesisGuardDid(join(runDir, "audit.jsonl")) ?? "?"}\`` +
+      `Source: \`${runDir}/\`. Audit log ${meta.headHash ? `head hash \`${meta.headHash}\` (seq ${meta.headSeq}), ` : ""}signed by guard DID \`${meta.guardDid ?? genesisGuardDid(join(runDir, "audit.jsonl")) ?? "?"}\`` +
       `${meta.gitCommit ? `, code at commit \`${meta.gitCommit}\`` : ""}.${errors ? ` ${errors} episode(s) ended with a model or tool error and are counted as they ended.` : ""}`,
   )
   lines.push("")
@@ -71,13 +72,23 @@ function section(runDir: string): string {
   lines.push("|---|---|---|")
   lines.push(`| Attack runs that moved money the owner did not intend | ${frac(s.attacks.naive)} | ${frac(s.attacks.guarded)} |`)
   lines.push(`| 95% confidence interval (Wilson) | ${ci(s.attacks.naive)} | ${ci(s.attacks.guarded)} |`)
+  const anyHarm = (mode: string) => {
+    const rs = attacks(mode)
+    const k = rs.filter((r) => r.score.flags.attackerPaid || r.score.flags.overpaid || r.score.flags.overBudget || r.score.flags.overDailyCap).length
+    return `${k}/${rs.length}`
+  }
+  lines.push(`| Attack runs with any unintended money movement (any harm flag, not just the attack's goal) | ${anyHarm("naive")} | ${anyHarm("guarded")} |`)
   lines.push(`| Money sent to attacker accounts, all attack runs | ${money(s.attacks.naive.attackerReceivedCents)} | ${money(s.attacks.guarded.attackerReceivedCents)} |`)
   lines.push(`| Spend above what the tasks needed, all attack runs | ${money(excess("naive"))} | ${money(excess("guarded"))} |`)
   const triedRefused = attacks("guarded").filter((r) => r.score.blocked.length > 0).length
   lines.push(`| Attack runs where the agent tried a payment the guard refused | n/a | ${triedRefused}/${attacks("guarded").length} |`)
   lines.push(`| Legit task still completed during an attack | ${utilityUnderAttack("naive")} | ${utilityUnderAttack("guarded")} |`)
   lines.push(`| Benign tasks completed | ${s.benign.naive.completed}/${s.benign.naive.n} | ${s.benign.guarded.completed}/${s.benign.guarded.n} |`)
-  lines.push(`| Guard blocks or escalations on benign tasks | n/a | ${s.benign.guardBlocksOnBenign} |`)
+  const benignG = rows.filter((r) => r.category === "benign" && r.mode === "guarded")
+  const held = benignG.reduce((a, r) => a + r.score.escalations, 0)
+  const benignBlocked = benignG.reduce((a, r) => a + r.score.blocked.filter((b) => b.status === "blocked").length, 0)
+  lines.push(`| Benign payments blocked by a deny rule | n/a | ${benignBlocked} |`)
+  lines.push(`| Benign payments held for a human (declined by the benchmark's deny-by-default approver) | n/a | ${held} |`)
   lines.push("")
   lines.push("| Attack category | Without guard | With ACK Guard | Rules that stopped attempts (guarded) |")
   lines.push("|---|---|---|---|")

@@ -15,6 +15,7 @@ export type ProblemKind =
   | "head_missing"
   | "head_mismatch"
   | "bad_head_signature"
+  | "anchor_mismatch"
 
 export interface VerifyProblem {
   seq: number | null
@@ -29,6 +30,8 @@ export interface VerifyReport {
   signerDid?: string
   /** True only when the expected signer came from outside the log (operator config or --signer). */
   pinned: boolean
+  /** Hash of the last entry, to be anchored outside the log. */
+  headHash?: string
   /**
    * The first position in the chain (0-based, equal to the seq an untouched
    * entry there would have) where verification breaks. For an edited entry this
@@ -64,7 +67,17 @@ async function sigOk(jwt: string, did: string, resolver: DidResolver): Promise<R
 
 export async function verifyLog(
   path: string,
-  opts: { expectedSignerDid?: string; resolver?: DidResolver; checkHead?: boolean } = {},
+  opts: {
+    expectedSignerDid?: string
+    resolver?: DidResolver
+    checkHead?: boolean
+    /**
+     * Hash of the last entry as recorded somewhere outside the log (a published
+     * README, a git tag, a transparency log). Detects rolling the log back to an
+     * older state together with an older, genuine head file.
+     */
+    expectedHeadHash?: string
+  } = {},
 ): Promise<VerifyReport> {
   const resolver = opts.resolver ?? getDidResolver()
   const problems: VerifyProblem[] = []
@@ -128,11 +141,28 @@ export async function verifyLog(
   }
 
   const firstBad = problems.length ? Math.min(...problems.map((p) => p.line)) - 1 : null
+  if (opts.expectedHeadHash) {
+    const last = entries[entries.length - 1]
+    if (!last || last.hash !== opts.expectedHeadHash) {
+      const at = entries.findIndex((e) => e?.hash === opts.expectedHeadHash)
+      problems.push({
+        seq: last?.seq ?? null,
+        line: at >= 0 ? at + 2 : entries.length + 1,
+        kind: "anchor_mismatch",
+        detail:
+          at >= 0
+            ? `the anchored head is entry ${at}, but the log continues past it`
+            : "the anchored head hash does not appear in this log (rolled back, swapped or rewritten)",
+      })
+    }
+  }
+
   return {
     ok: problems.length === 0,
     entries: entries.length,
     signerDid,
     pinned: opts.expectedSignerDid !== undefined,
+    headHash: entries[entries.length - 1]?.hash,
     firstBadSeq: firstBad,
     problems,
   }

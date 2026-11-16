@@ -75,11 +75,35 @@ export class AuditLog {
   readonly entries: AuditEntry[] = []
   private listeners = new Set<(e: AuditEntry) => void>()
 
+  /**
+   * Opens a log for appending. An existing log is verified first (chain,
+   * signatures pinned to this signer, signed head); appending to a log that
+   * fails verification is refused, because the next append would write a new
+   * valid head over the evidence (for example after the tail was truncated).
+   */
+  static async open(path: string, signer: Party): Promise<AuditLog> {
+    if (existsSync(path) && readFileSync(path, "utf8").trim()) {
+      const { verifyLog } = await import("./verify.js")
+      const r = await verifyLog(path, { expectedSignerDid: signer.did })
+      if (!r.ok) {
+        throw new Error(
+          `refusing to append to ${path}: it fails verification at position ${r.firstBadSeq} (${r.problems[0]?.kind}: ${r.problems[0]?.detail})`,
+        )
+      }
+      return new AuditLog(path, signer, { verified: true })
+    }
+    return new AuditLog(path, signer)
+  }
+
   constructor(
     readonly path: string,
     private readonly signer: Party,
+    opts: { verified?: boolean } = {},
   ) {
     mkdirSync(dirname(path), { recursive: true })
+    if (existsSync(path) && readFileSync(path, "utf8").trim() && !opts.verified) {
+      throw new Error(`${path} already exists; use AuditLog.open() so it is verified before appending`)
+    }
     if (existsSync(path)) {
       for (const line of readFileSync(path, "utf8").split("\n")) {
         if (!line.trim()) continue

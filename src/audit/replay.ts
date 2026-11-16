@@ -46,6 +46,8 @@ export interface ReplayResult {
   receipt?: { seq: number; jwt: string; issuer: string; verifiedNow: { ok: boolean; error?: string; txId?: string } }
   chain: VerifyReport & { relatedSeqs: number[]; relatedEntriesIntact: boolean }
   error?: string
+  /** Only a fully verified log signed by a pinned key is trustworthy evidence. */
+  trusted: boolean
   finalOutcome: string
 }
 
@@ -92,7 +94,11 @@ export async function replayAttempt(
   opts: { expectedSignerDid?: string; resolver?: DidResolver } = {},
 ): Promise<ReplayResult> {
   const resolver = opts.resolver ?? getDidResolver()
-  const entries = readEntries(path).entries.filter((e): e is AuditEntry => !!e)
+  const all = readEntries(path).entries
+  // Remember each entry's line, so integrity is matched by position, not by the seq an entry claims.
+  const lineOf = new Map<AuditEntry, number>()
+  all.forEach((e, i) => e && lineOf.set(e, i + 1))
+  const entries = all.filter((e): e is AuditEntry => !!e)
   const genesis = genesisOf(entries)
   const g = (genesis?.payload ?? {}) as {
     guardDid?: string
@@ -153,10 +159,15 @@ export async function replayAttempt(
   // Only an externally supplied signer counts as pinned. Without one, the
   // identity and receipt checks above are relative to the log's own genesis.
   const chain = await verifyLog(path, { expectedSignerDid: opts.expectedSignerDid, resolver })
-  const relatedSeqs = [genesis?.seq, task?.seq, ...reasoning.map((r) => r.seq), ...related.map((e) => e.seq)].filter(
-    (s): s is number => typeof s === "number",
-  )
-  const badSeqs = new Set(chain.problems.map((p) => p.seq))
+  const usedEntries = [
+    genesis,
+    task,
+    ...entries.filter((e) => e.kind === "agent_step" && e.payload.episodeId === episodeId && e.seq < attempt.seq),
+    ...related,
+  ].filter((e): e is AuditEntry => !!e)
+  const relatedSeqs = usedEntries.map((e) => (Number.isInteger(e.seq) ? e.seq : -1))
+  const badLines = new Set(chain.problems.map((p) => p.line))
+  const relatedIntact = usedEntries.every((e) => Number.isInteger(e.seq) && !badLines.has(lineOf.get(e) ?? -1))
   const lastDecision = decisions[decisions.length - 1]
   return {
     attemptId,
@@ -180,7 +191,8 @@ export async function replayAttempt(
     approval: ap ? { seq: ap.seq, approved: ap.payload.approved as boolean, by: ap.payload.by as string } : undefined,
     settlement: st ? { seq: st.seq, tx: st.payload.tx as Record<string, unknown> } : undefined,
     receipt,
-    chain: { ...chain, relatedSeqs, relatedEntriesIntact: relatedSeqs.every((s) => !badSeqs.has(s)) },
+    chain: { ...chain, relatedSeqs, relatedEntriesIntact: relatedIntact },
+    trusted: chain.ok && chain.pinned,
     error: err ? (err.payload.error as string) : undefined,
     finalOutcome: st ? "paid" : err ? "failed" : (lastDecision?.outcome ?? "unknown"),
   }

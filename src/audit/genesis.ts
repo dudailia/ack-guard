@@ -6,6 +6,8 @@ import type { AuditLog } from "./chain.js"
 export async function writeGenesis(audit: AuditLog, ids: Identities, policy: PolicyConfig, meta: Record<string, unknown> = {}) {
   if (audit.entries.length > 0) return audit.entries[0]
   return audit.append("genesis", {
+    // A fresh id per log, so one log cannot be passed off as another run's.
+    runId: crypto.randomUUID(),
     guardDid: ids.parties.guard.did,
     ownerDid: ids.parties.owner.did,
     agentDid: ids.parties.agent.did,

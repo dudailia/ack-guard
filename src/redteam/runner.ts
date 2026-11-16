@@ -7,7 +7,7 @@
 // Resumable: episodes already in episodes.jsonl are skipped.
 
 import { execSync } from "node:child_process"
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { AuditLog } from "../audit/chain.js"
 import { writeGenesis } from "../audit/genesis.js"
@@ -29,6 +29,8 @@ export interface SuiteOptions {
   outDir: string
   modes?: Mode[]
   onEpisode?: (row: EpisodeRow, done: number, total: number) => void
+  /** Allow resuming a run that was started with different code (results will be mixed; avoid). */
+  allowCodeChange?: boolean
   meta?: Record<string, unknown>
 }
 
@@ -37,31 +39,47 @@ export async function runSuite(opts: SuiteOptions) {
   mkdirSync(opts.outDir, { recursive: true })
   const episodesPath = join(opts.outDir, "episodes.jsonl")
   const done = new Set(existsSync(episodesPath) ? readRows(episodesPath).map((r) => r.episodeId) : [])
-  const audit = new AuditLog(join(opts.outDir, "audit.jsonl"), opts.ids.parties.guard)
+  const audit = await AuditLog.open(join(opts.outDir, "audit.jsonl"), opts.ids.parties.guard)
   await writeGenesis(audit, opts.ids, buildPolicyConfig(opts.ids), { model: opts.model.id })
-  writeFileSync(
-    join(opts.outDir, "meta.json"),
-    JSON.stringify(
-      {
-        model: opts.model.id,
-        modelLabel: opts.model.label,
-        provider: opts.model.provider,
-        temperature: opts.model.temperature,
-        maxSteps: MAX_STEPS,
-        runs: opts.runs,
-        modes,
-        gitCommit: gitCommit(),
-        guardDid: opts.ids.parties.guard.did,
-        scenarios: opts.scenarios.map((s) => s.id),
-        systemPrompt: SYSTEM_PROMPT,
-        node: process.version,
-        startedAt: new Date().toISOString(),
-        ...opts.meta,
-      },
-      null,
-      2,
-    ),
-  )
+  // meta.json is written once, when the run starts. A resume must run the same
+  // code: results from two code versions must never be mixed in one run.
+  const metaPath = join(opts.outDir, "meta.json")
+  const commit = gitCommit()
+  if (existsSync(metaPath)) {
+    const meta = JSON.parse(readFileSync(metaPath, "utf8")) as Record<string, unknown> & { resumes?: string[] }
+    if (meta.gitCommit !== commit && !opts.allowCodeChange) {
+      throw new Error(
+        `refusing to resume ${opts.outDir}: it was started at commit ${meta.gitCommit ?? "unknown"} but the code is now ${commit ?? "unknown"}`,
+      )
+    }
+    meta.resumes = [...(meta.resumes ?? []), new Date().toISOString()]
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2))
+  } else {
+    writeFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          model: opts.model.id,
+          modelLabel: opts.model.label,
+          provider: opts.model.provider,
+          temperature: opts.model.temperature,
+          maxSteps: MAX_STEPS,
+          runs: opts.runs,
+          modes,
+          gitCommit: commit,
+          guardDid: opts.ids.parties.guard.did,
+          runId: (audit.entries[0]?.payload.runId as string | undefined) ?? null,
+          scenarios: opts.scenarios.map((s) => s.id),
+          systemPrompt: SYSTEM_PROMPT,
+          node: process.version,
+          startedAt: new Date().toISOString(),
+          ...opts.meta,
+        },
+        null,
+        2,
+      ),
+    )
+  }
 
   const ctx = makeBuildCtx(opts.ids)
   const total = opts.runs * opts.scenarios.length * modes.length
@@ -115,6 +133,11 @@ export async function runSuite(opts: SuiteOptions) {
     }
   }
   await audit.flush()
+  const finalMeta = JSON.parse(readFileSync(metaPath, "utf8")) as Record<string, unknown>
+  finalMeta.finishedAt = new Date().toISOString()
+  finalMeta.headHash = audit.entries[audit.entries.length - 1]?.hash
+  finalMeta.headSeq = audit.entries[audit.entries.length - 1]?.seq
+  writeFileSync(metaPath, JSON.stringify(finalMeta, null, 2))
   const summary = summarize(readRows(episodesPath))
   writeFileSync(join(opts.outDir, "summary.json"), JSON.stringify(summary, null, 2))
   return summary

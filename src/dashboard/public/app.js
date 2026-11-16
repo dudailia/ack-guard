@@ -227,7 +227,8 @@ async function replay(id) {
   box.innerHTML = `
     <h2>${esc(scenarioTitle(t.scenarioId) || r.attemptId)}</h2>
     <p class="muted">${esc(r.mode)} agent${t.scenarioId ? `, scenario ${esc(t.scenarioId)}` : ""}${t.model ? `, model ${esc(t.model)}` : ""}. Attempt ${esc(r.attemptId)}</p>
-    <p class="verdict ${verdictCls}">${esc(verdictText)}</p>
+    ${r.chain.ok ? "" : `<p class="verdict stopped">This log fails verification (first bad entry ${esc(r.chain.firstBadSeq)}). Nothing below is trustworthy evidence.</p>`}
+    <p class="verdict ${verdictCls}">${esc(verdictText)}${r.trusted ? "" : " (unverified)"}</p>
     <ol class="steps">
       <li><div><h3>Task, as set by the owner</h3><p class="quote">${esc(task.prompt)}</p>
         <dl class="kv"><dt>Declared needs</dt><dd>${esc((task.needs || []).join(", ") || "none")}</dd><dt>Budget</dt><dd>${money(task.budget)}</dd></dl></div></li>

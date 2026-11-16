@@ -9,13 +9,14 @@ import { Hono } from "hono"
 import { AGENT_STARTING_BALANCE, HOSTS } from "./config.js"
 import type { AuditLog } from "./audit/chain.js"
 import type { Identities } from "./identity/identities.js"
-import { verifyAgentIdentity, type IdentityVerification } from "./identity/verify-identity.js"
+import { verifyAgentIdentity } from "./identity/verify-identity.js"
 import { SandboxLedger } from "./ledger/sandbox-ledger.js"
 import { merchantSpecs, type MerchantKey } from "./merchants/catalog.js"
 import { createMerchantApp, type MerchantBehavior, type MerchantStats } from "./merchants/framework.js"
 import { formatAmount, parseSubunits } from "./money.js"
 import { buildPolicyConfig } from "./policy/config.js"
 import { evaluatePayment } from "./policy/engine.js"
+import { SpendStore } from "./policy/spend-store.js"
 import type { Decision, PaymentFacts, PolicyConfig, SpendHistory, TaskSpec } from "./policy/types.js"
 import { checkReceipt, ReceiptService } from "./receipts/receipt-service.js"
 import { SandboxNet } from "./sandbox/net.js"
@@ -64,7 +65,6 @@ export class World {
   readonly ledger = new SandboxLedger()
   readonly receipts: ReceiptService
   readonly policy: PolicyConfig
-  readonly history: SpendHistory = { payments: [] }
   readonly merchantStats: Record<string, MerchantStats> = {}
   /** Payment request tokens the agent received in 402 responses, keyed by token. */
   private seen402 = new Map<string, Seen402>()
@@ -73,7 +73,6 @@ export class World {
   /** Short references for payment request tokens seen anywhere (pr_1, pr_2, ...). Same for both modes. */
   private refToToken = new Map<string, string>()
   private tokenToRef = new Map<string, string>()
-  private identityCheck?: IdentityVerification
   attemptCounter = 0
   readonly outcomes: { attemptId: string; result: PayResult; decision?: Decision }[] = []
 
@@ -84,17 +83,19 @@ export class World {
     readonly audit: AuditLog,
     readonly episodeId: string,
     readonly approver: Approver = denyAllApprover,
+    /** Shared spend history and payment lock. A fresh one per World unless the caller shares one. */
+    readonly spend: SpendStore = new SpendStore(),
   ) {
     this.receipts = new ReceiptService(ids.parties.receipts, this.ledger, ids.resolver)
     this.policy = buildPolicyConfig(ids)
     this.ledger.fund(ids.parties.agent.did, AGENT_STARTING_BALANCE)
     const now = Date.now()
     for (const p of setup.priorSpend ?? []) {
-      this.history.payments.push({
+      this.spend.history.payments.push({
         ts: now - p.hoursAgo * 3600 * 1000,
         amount: p.amount,
         taskId: "earlier-task",
-        paymentRequestId: `prior-${this.history.payments.length}`,
+        paymentRequestId: `prior-${crypto.randomUUID()}`,
         merchantDid: ids.parties.lingua.did,
       })
     }
@@ -125,6 +126,10 @@ export class World {
 
   get task() {
     return this.setup.task
+  }
+
+  get history(): SpendHistory {
+    return this.spend.history
   }
 
   /** HTTP GET through the sandbox, presenting ACK-ID and any receipt held for this URL. */
@@ -173,16 +178,13 @@ export class World {
   }
 
   /**
-   * Payments are serialized: the AI SDK can run several tool calls from one
-   * model step concurrently, and each decision must see every earlier payment
-   * in the spend history (duplicate, budget and daily-cap rules).
+   * Payments are serialized through the spend store: the AI SDK can run
+   * several tool calls from one model step concurrently, and every decision
+   * must see every earlier payment (duplicate, budget and daily-cap rules),
+   * including payments made by other episodes that share the store.
    */
-  private payQueue: Promise<unknown> = Promise.resolve()
-
   pay(input: PayInput): Promise<PayResult> {
-    const p = this.payQueue.then(() => this.payOne(input))
-    this.payQueue = p.catch(() => undefined)
-    return p
+    return this.spend.run(() => this.payOne(input))
   }
 
   private async payOne(input: PayInput): Promise<PayResult> {
@@ -263,7 +265,7 @@ export class World {
       return result
     }
     await this.audit.append("settlement", { ...base, tx: { ...tx, amount: tx.amount.toString() } })
-    this.history.payments.push({
+    this.spend.record({
       ts: tx.ts,
       amount: tx.amount,
       taskId: this.task.id,
@@ -331,12 +333,12 @@ export class World {
     } catch (e) {
       facts.requestSignature = { ok: false, error: (e as Error).message.slice(0, 200) }
     }
-    this.identityCheck ??= await verifyAgentIdentity(this.ids.controllerCredential, {
+    // Re-verified on every payment (signature, owner, controller claim).
+    facts.identity = await verifyAgentIdentity(this.ids.controllerCredential, {
       resolver: this.ids.resolver,
       expectedOwnerDid: this.policy.ownerDid,
       expectedAgentDid: this.policy.agentDid,
     })
-    facts.identity = this.identityCheck
     const seen = this.seen402.get(input.paymentRequest)
     facts.provenance = seen
       ? { ok: true, ...seen }
@@ -409,9 +411,19 @@ function factsForLog(f: PaymentFacts) {
   }
 }
 
+/**
+ * Canonical form of a URL, used both for fetching and as the key for
+ * provenance and duplicate detection: lowercase host, no fragment, query
+ * parameters decoded and sorted. So "?b=2&a=1#x" and "?a=1&b=2" are the same
+ * purchase. (Adding a new parameter still makes a different URL; see DC-05.)
+ */
 export function normalizeUrl(raw: string): string {
   const s = raw.trim()
   const u = new URL(s.includes("://") ? s : `http://${s}`)
   u.protocol = "http:"
+  u.hash = ""
+  const params = [...u.searchParams.entries()].sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)))
+  u.search = ""
+  for (const [k, v] of params) u.searchParams.append(k, v)
   return u.toString()
 }

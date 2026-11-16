@@ -27,7 +27,7 @@ const port = Number(arg("port", "4300"))
 const ids = await localIdentities()
 // Each demo session gets a fresh log, so the timeline shows only this session.
 const sessionStamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
-const audit = new AuditLog(join(process.cwd(), ".data", "live", `audit-${sessionStamp}.jsonl`), ids.parties.guard)
+const audit = await AuditLog.open(join(process.cwd(), ".data", "live", `audit-${sessionStamp}.jsonl`), ids.parties.guard)
 
 let model: ResolvedModel
 const requested = arg("model")
