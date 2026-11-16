@@ -1,9 +1,10 @@
 // pnpm demo: the one-command run.
 //  1. Generates local keys on first run (.data/keys.json, gitignored).
 //  2. Starts the dashboard on http://localhost:4300 (127.0.0.1 only).
-//  3. Runs a few live episodes into a signed audit log (.data/audit.jsonl):
-//     a benign payment, a fake-invoice attack against both agents, and a
-//     legit payment that needs a human (approve or decline it in the dashboard).
+//  3. Writes this session's events to a fresh signed log (.data/live/).
+//     The dashboard's "Run the guided demo" button runs one legitimate payment,
+//     one injected attack and one tampering attempt. `--auto` runs a short
+//     sequence from the terminal instead (no browser needed).
 // Uses local qwen3:8b through Ollama if it is installed; otherwise a
 // deterministic scripted stand-in (clearly labelled, never reported as an LLM).
 
@@ -24,7 +25,9 @@ import { arg, c, flag } from "./util.js"
 loadEnv()
 const port = Number(arg("port", "4300"))
 const ids = await localIdentities()
-const audit = new AuditLog(join(process.cwd(), ".data", "audit.jsonl"), ids.parties.guard)
+// Each demo session gets a fresh log, so the timeline shows only this session.
+const sessionStamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+const audit = new AuditLog(join(process.cwd(), ".data", "live", `audit-${sessionStamp}.jsonl`), ids.parties.guard)
 
 let model: ResolvedModel
 const requested = arg("model")
@@ -95,19 +98,17 @@ const { url } = startDashboard({
   approvals,
   liveInfo: () => ({ model: model.label }),
   operatorGuardDid: ids.parties.guard.did,
-  runScenario: async (scenarioId, mode) => {
-    const { episodeId } = await run(scenarioId, mode)
-    return { episodeId }
-  },
+  runScenario: (scenarioId, mode) => run(scenarioId, mode),
 })
 
 console.log(c.bold("\nACK Guard demo"))
 console.log(`  dashboard   ${c.cyan(url)}`)
 console.log(`  agent model ${model.label}`)
-console.log(`  audit log   .data/audit.jsonl (hash-chained, signed by ${ids.parties.guard.did.slice(0, 32)}...)`)
+console.log(`  audit log   ${audit.path.replace(process.cwd() + "/", "")} (hash-chained, signed by ${ids.parties.guard.did.slice(0, 32)}...)`)
 console.log(c.dim("  sandbox only: fictional merchants on .test hosts, an in-memory ledger, no real money\n"))
 
-if (!flag("no-auto")) {
+console.log(`Open ${c.cyan(url)} and click "Run the guided demo": one legitimate payment, one injected attack, one tampering attempt.`)
+if (flag("auto")) {
   console.log(c.bold("Running live episodes:"))
   for (const [id, mode] of [
     ["B-01", "guarded"],

@@ -14,7 +14,11 @@ import { listAttempts, replayAttempt } from "../audit/replay.js"
 import { trustedSignerFor } from "../audit/trust.js"
 import { verifyLog } from "../audit/verify.js"
 import { findLogs } from "../cli/util.js"
+import type { EpisodeResult } from "../agent/run-episode.js"
+import { RULE_TITLES } from "../policy/engine.js"
 import type { Decision } from "../policy/types.js"
+import { approvalDemo } from "../redteam/demo-scenarios.js"
+import { ALL_SCENARIOS } from "../redteam/index.js"
 import { CATEGORY_LABELS } from "../redteam/types.js"
 import type { Scenario } from "../redteam/types.js"
 
@@ -33,7 +37,7 @@ export interface DashboardOptions {
   port?: number
   liveLog?: AuditLog
   scenarios?: Scenario[]
-  runScenario?: (scenarioId: string, mode: "naive" | "guarded") => Promise<{ episodeId: string }>
+  runScenario?: (scenarioId: string, mode: "naive" | "guarded") => Promise<{ episodeId: string; done: Promise<EpisodeResult> }>
   approvals?: Map<string, PendingApproval>
   liveInfo?: () => Record<string, unknown>
   root?: string
@@ -103,6 +107,14 @@ export function createDashboard(opts: DashboardOptions) {
     return c.json({ runs, categoryLabels: CATEGORY_LABELS })
   })
 
+  app.get("/api/catalog", (c) =>
+    c.json({
+      categories: CATEGORY_LABELS,
+      rules: RULE_TITLES,
+      scenarios: Object.fromEntries([...ALL_SCENARIOS, approvalDemo].map((s) => [s.id, { title: s.title, category: s.category, description: s.description }])),
+    }),
+  )
+
   app.get("/api/logs", (c) => {
     const live = opts.liveLog ? rel(resolve(opts.liveLog.path)) : undefined
     return c.json({ live, logs: findLogs(root).map(rel) })
@@ -141,7 +153,10 @@ export function createDashboard(opts: DashboardOptions) {
     copyFileSync(log, copy)
     if (existsSync(headPath(log))) copyFileSync(headPath(log), headPath(copy))
     const lines = readFileSync(copy, "utf8").trim().split("\n")
-    let idx = lines.findIndex((l) => l.includes('"kind":"decision"') && l.includes('"outcome":"deny"'))
+    const attemptId = c.req.query("attemptId")
+    const isDeny = (l: string) => l.includes('"kind":"decision"') && l.includes('"outcome":"deny"')
+    let idx = attemptId ? lines.findIndex((l) => isDeny(l) && l.includes(`"attemptId":${JSON.stringify(attemptId)}`)) : -1
+    if (idx < 0) idx = lines.findIndex(isDeny)
     let change = 'a blocked decision rewritten to "allow"'
     if (idx < 0) {
       idx = lines.findIndex((l) => l.includes('"kind":"decision"'))
@@ -169,11 +184,24 @@ export function createDashboard(opts: DashboardOptions) {
 
   app.post("/api/run", async (c) => {
     if (!opts.runScenario) return c.json({ error: "live runs are available when started with pnpm demo" }, 400)
-    const body = (await c.req.json()) as { scenarioId: string; mode: "naive" | "guarded" }
+    const body = (await c.req.json()) as { scenarioId: string; mode: "naive" | "guarded"; wait?: boolean }
     if (!opts.scenarios?.some((s) => s.id === body.scenarioId)) return c.json({ error: "unknown scenario" }, 400)
     if (body.mode !== "naive" && body.mode !== "guarded") return c.json({ error: "mode must be naive or guarded" }, 400)
-    const r = await opts.runScenario(body.scenarioId, body.mode)
-    return c.json(r)
+    const { episodeId, done } = await opts.runScenario(body.scenarioId, body.mode)
+    if (!body.wait) return c.json({ episodeId })
+    const r = await done
+    return c.json({
+      episodeId,
+      error: r.error,
+      attempts: r.payResults.map((p) => ({
+        attemptId: p.attemptId,
+        status: p.result.status,
+        rule: p.rule ?? ("rule" in p.result ? p.result.rule : undefined),
+        reason: "reason" in p.result ? p.result.reason : undefined,
+        amount: "amount" in p.result ? p.result.amount : undefined,
+        recipient: "recipient" in p.result ? p.result.recipient : undefined,
+      })),
+    })
   })
 
   app.get("/api/approvals", (c) =>

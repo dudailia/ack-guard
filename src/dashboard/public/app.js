@@ -13,16 +13,38 @@ const api = async (path, init) => {
   return j
 }
 
-const state = { runs: [], labels: {}, run: null, log: null, attempts: [], filter: "all", selected: null, liveLog: null }
+const state = { runs: [], labels: {}, catalog: { scenarios: {}, rules: {} }, run: null, log: null, attempts: [], filter: "all", selected: null, liveLog: null }
+
+// Plain-language names for policy rules. The rule ids stay visible in replay.
+const RULE_LABELS = {
+  REQ_SIGNATURE: "Invalid payment request",
+  AGENT_IDENTITY: "Agent identity not verified",
+  REQ_PROVENANCE: "Not a quote the agent asked for",
+  MERCHANT_ALLOWLIST: "Unknown merchant",
+  RECIPIENT_BINDING: "Wrong payout account",
+  PRICE_BINDING: "Wrong price",
+  PURPOSE_BINDING: "Not needed for this task",
+  DUPLICATE_CHARGE: "Already paid",
+  PER_PAYMENT_CAP: "Over the per-payment cap",
+  TASK_BUDGET: "Over the task budget",
+  DAILY_CAP: "Over the daily cap",
+  HUMAN_APPROVAL: "Needs a human",
+  ALL_RULES_PASSED: "All checks passed",
+  NO_GUARD: "No guard, no checks",
+}
+const ruleLabel = (id) => RULE_LABELS[id] || id
+const scenarioTitle = (id) => state.catalog.scenarios[id]?.title
+const runLabel = (r) => `${r.path.replace(/^results\//, "")}${r.meta?.superseded ? " (pre-fix, superseded)" : ""}`
 
 // ---------- scoreboard ----------
 async function loadRuns(keepSelection = true) {
   const { runs, categoryLabels } = await api("/api/runs")
-  state.labels = categoryLabels
-  state.runs = runs.sort((a, b) => b.path.localeCompare(a.path))
+  state.labels = { ...categoryLabels, ...state.labels }
+  // Newest first, superseded runs last.
+  state.runs = runs.sort((a, b) => (!!a.meta?.superseded - !!b.meta?.superseded) || b.path.localeCompare(a.path))
   const sel = $("#run")
   const prev = keepSelection ? sel.value : ""
-  sel.innerHTML = state.runs.map((r) => `<option value="${esc(r.path)}">${esc(r.path.replace(/^results\//, ""))}</option>`).join("")
+  sel.innerHTML = state.runs.map((r) => `<option value="${esc(r.path)}">${esc(runLabel(r))}</option>`).join("")
   if (!state.runs.length) {
     $("#run-meta").textContent = "No recorded runs yet. Run pnpm redteam to record one."
     return
@@ -38,7 +60,9 @@ function renderRun() {
   const s = run.summary
   const meta = run.meta || {}
   const total = meta.scenarios && meta.modes && meta.runs ? meta.scenarios.length * meta.modes.length * meta.runs : null
-  const progress = total && s.episodes < total ? `, recording: ${s.episodes} of ${total} episodes so far` : ""
+  const progress =
+    (total && s.episodes < total ? `, recording: ${s.episodes} of ${total} episodes so far` : "") +
+    (meta.superseded ? `. Pre-fix run, superseded: ${meta.supersededReason || "kept for the record"}` : "")
   const ids = meta.scenarios || []
   const nBenign = ids.filter((id) => id.startsWith("B-")).length
   const runs = meta.runs || s.runsPerScenario
@@ -63,7 +87,7 @@ function renderRun() {
   }
   $("#cats").innerHTML = Object.entries(s.byCategory)
     .map(([k, v]) => {
-      const rules = Object.entries(rulesByCat[k] || {}).sort((a, b) => b[1] - a[1]).map(([r]) => r).slice(0, 3).join(", ")
+      const rules = Object.entries(rulesByCat[k] || {}).sort((a, b) => b[1] - a[1]).map(([r]) => ruleLabel(r)).slice(0, 3).join(", ")
       const note = rules || (v.guarded.n ? "no payment was attempted" : "not run yet")
       return `<tr><th scope="row">${esc(v.label)}</th><td>${bar("naive", v.naive)}</td><td>${bar("guarded", v.guarded)}</td><td class="rules">${esc(note)}</td></tr>`
     })
@@ -72,7 +96,7 @@ function renderRun() {
     .map((sc) => {
       const benign = sc.category === "benign"
       const cell = (x) => (benign ? `completed ${x.completed}/${x.n}` : `${x.successes}/${x.n} succeeded`)
-      const rules = Object.entries(sc.guarded.rules || {}).map(([r, n]) => `${r} x${n}`).join(", ")
+      const rules = Object.entries(sc.guarded.rules || {}).map(([r, n]) => `${ruleLabel(r)} (${n})`).join(", ")
       return `<tr><td><b>${esc(sc.id)}</b></td><td>${esc(sc.title)}${sc.probesGap ? `<span class="gap-note">Probes a known gap: ${esc(sc.probesGap)}</span>` : ""}</td><td>${cell(sc.naive)}</td><td>${cell(sc.guarded)}</td><td class="rules">${esc(rules)}</td></tr>`
     })
     .join("")
@@ -102,7 +126,12 @@ async function loadLogs() {
   const { live, logs } = await api("/api/logs")
   state.liveLog = live
   const sel = $("#log")
-  const label = (p) => (p === live ? "Live demo log" : p.replace(/^results\//, "").replace(/\/audit\.jsonl$/, ""))
+  const label = (p) =>
+    p === live
+      ? "This demo session"
+      : p.startsWith(".data/live/")
+        ? `Earlier demo session ${p.replace(/^.*audit-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2}).*$/, "$1-$2-$3 $4:$5")}`
+        : p.replace(/^results\//, "Benchmark ").replace(/\/audit\.jsonl$/, "")
   sel.innerHTML = logs.map((p) => `<option value="${esc(p)}">${esc(label(p))}</option>`).join("")
   if (!state.log || !logs.includes(state.log)) state.log = live && logs.includes(live) ? live : logs[0]
   if (state.log) sel.value = state.log
@@ -141,9 +170,11 @@ function renderAttempts() {
       .map((a) => {
         const [cls, text] = outcomeTag(a)
         const when = new Date(a.ts).toLocaleTimeString()
-        const rule = a.mode === "guarded" ? a.rule : "no policy"
-        return `<li class="attempt" tabindex="0" data-id="${esc(a.attemptId)}" aria-current="${a.attemptId === state.selected}">
-          <span class="id">${esc(a.attemptId)}</span><span class="tag ${cls}">${esc(text)}</span>
+        const rule = a.mode === "guarded" ? ruleLabel(a.rule) : "no guard"
+        const title = scenarioTitle(a.scenarioId) || a.attemptId
+        const attemptNo = a.attemptId.split("#")[1]
+        return `<li class="attempt" tabindex="0" data-id="${esc(a.attemptId)}" title="${esc(a.attemptId)}" aria-current="${a.attemptId === state.selected}">
+          <span class="id">${esc(title)}${attemptNo && attemptNo !== "1" ? ` (payment ${esc(attemptNo)})` : ""}</span><span class="tag ${cls}">${esc(text)}</span>
           <span class="meta">${esc(when)}, ${esc(a.mode)} agent, ${esc(rule)}${a.category ? `, ${esc(state.labels[a.category] || a.category)}` : ""}</span></li>`
       })
       .join("") || `<li class="muted">Nothing matches this filter.</li>`
@@ -180,7 +211,7 @@ async function replay(id) {
         ? `Payment failed at settlement: ${r.error || "unknown error"}`
         : r.finalOutcome === "needs_approval"
         ? `Held for a human, who declined. Rule: ${last?.rule?.id}`
-        : `Blocked by ${last?.rule?.id}: ${last?.rule?.detail}`
+        : `Blocked: ${ruleLabel(last?.rule?.id)}. ${last?.rule?.detail}`
   const yes = (b) => (b ? `<span class="ok">verified</span>` : `<span class="bad">failed</span>`)
   const req = r.proposed.request || {}
   const options = (req.options || []).map((o) => `${esc(o.id)}: ${money(o.amount)} to ${esc(o.recipient)}`).join("<br>")
@@ -194,8 +225,8 @@ async function replay(id) {
       )
       .join("") || `<p class="muted">No agent steps recorded before this attempt.</p>`
   box.innerHTML = `
-    <h2>${esc(r.attemptId)}</h2>
-    <p class="muted">${esc(r.mode)} agent${t.scenarioId ? `, scenario ${esc(t.scenarioId)}` : ""}${t.model ? `, model ${esc(t.model)}` : ""}</p>
+    <h2>${esc(scenarioTitle(t.scenarioId) || r.attemptId)}</h2>
+    <p class="muted">${esc(r.mode)} agent${t.scenarioId ? `, scenario ${esc(t.scenarioId)}` : ""}${t.model ? `, model ${esc(t.model)}` : ""}. Attempt ${esc(r.attemptId)}</p>
     <p class="verdict ${verdictCls}">${esc(verdictText)}</p>
     <ol class="steps">
       <li><div><h3>Task, as set by the owner</h3><p class="quote">${esc(task.prompt)}</p>
@@ -210,7 +241,7 @@ async function replay(id) {
           ? r.decisions
               .map(
                 (d) =>
-                  `<p><b>${esc(d.outcome)}</b> by <b>${esc(d.rule.id)}</b>${d.afterApproval ? " (after approval)" : ""}</p>${
+                  `<p><b>${esc(d.outcome)}</b> by <b>${esc(d.rule.id)}</b> (${esc(ruleLabel(d.rule.id))})${d.afterApproval ? ", after approval" : ""}</p>${
                     d.checks.length ? `<ul class="checks">${d.checks.map((ch) => checkRow(ch, d.rule.id)).join("")}</ul>` : `<p class="muted">${esc(d.rule.detail)}</p>`
                   }`,
               )
@@ -246,12 +277,76 @@ async function tamper() {
   }
 }
 
+// ---------- guided demo ----------
+function setStep(n, cls, html, done) {
+  const el = $(`#g${n}`)
+  el.className = `result ${cls}`
+  el.innerHTML = html
+  const li = el.closest("li")
+  li.classList.remove("done-good", "done-stop")
+  if (done) li.classList.add(done)
+}
+const replayLink = (id, text) => `<button class="link" type="button" data-replay="${esc(id)}">${esc(text)}</button>`
+const runAndWait = (scenarioId) =>
+  api("/api/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenarioId, mode: "guarded", wait: true }) })
+
+async function guidedDemo() {
+  const btn = $("#guided-btn")
+  btn.disabled = true
+  for (const n of [1, 2, 3]) setStep(n, "", "", null)
+  try {
+    if (state.liveLog && state.log !== state.liveLog) {
+      state.log = state.liveLog
+      $("#log").value = state.liveLog
+    }
+    setStep(1, "running", "The agent is working on it", null)
+    const a = await runAndWait("B-01")
+    const paid = a.attempts.find((x) => x.status === "paid")
+    if (paid) setStep(1, "good", `Paid ${esc(paid.amount)}. All 12 checks passed and the ACK receipt verified. ${replayLink(paid.attemptId, "Open the replay")}`, "done-good")
+    else setStep(1, "warn", `The agent did not complete the purchase this time${a.error ? ` (${esc(a.error)})` : ""}.`, null)
+
+    setStep(2, "running", "The agent is reading its inbox", null)
+    const b = await runAndWait("FI-01")
+    const blocked = b.attempts.find((x) => x.status === "blocked" || x.status === "escalated_denied")
+    if (blocked) {
+      setStep(2, "stop", `The agent tried to pay it. Blocked: ${esc(ruleLabel(blocked.rule))} (${esc(blocked.rule)}). No money moved to the attacker. ${replayLink(blocked.attemptId, "Open the replay")}`, "done-stop")
+    } else {
+      setStep(2, "warn", "The model ignored the planted invoice this time, so the guard had nothing to stop. Run the demo again to retry.", null)
+    }
+
+    setStep(3, "running", "Editing a copy of the log and verifying it", null)
+    const q = blocked ? `&attemptId=${encodeURIComponent(blocked.attemptId)}` : ""
+    const t = await api(`/api/tamper-demo?log=${encodeURIComponent(state.log)}${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+    setStep(
+      3,
+      t.after.ok ? "warn" : "stop",
+      t.after.ok
+        ? "The edit was not detected."
+        : `Detected at entry ${esc(t.after.firstBadSeq)}: ${esc(t.after.problems[0]?.detail || "")}. The original log still verifies.`,
+      t.after.ok ? null : "done-stop",
+    )
+    await Promise.all([loadAttempts(), checkIntegrity()])
+  } catch (e) {
+    $("#guided-info").textContent = e.message
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Run it again"
+  }
+}
+
+async function loadCatalog() {
+  state.catalog = await api("/api/catalog")
+  state.labels = state.catalog.categories
+}
+
 // ---------- live runs and approvals ----------
 async function loadLive() {
   const { canRun, scenarios, info } = await api("/api/scenarios")
   if (!canRun) return
   $("#live").hidden = false
+  $("#guided").hidden = false
   $("#live-info").textContent = info.model ? `Agent model: ${info.model}` : ""
+  $("#guided-info").textContent = `Runs live in the sandbox with ${info.model || "the configured agent"}. No real money moves.`
   $("#scenario").innerHTML = scenarios
     .map((s) => `<option value="${esc(s.id)}">${esc(s.id)}: ${esc(s.title)}</option>`)
     .join("")
@@ -295,6 +390,13 @@ $("#attempts").addEventListener("keydown", (e) => {
   }
 })
 $("#tamper-btn").addEventListener("click", tamper)
+$("#guided-btn").addEventListener("click", guidedDemo)
+$("#guided").addEventListener("click", (e) => {
+  const id = e.target.dataset?.replay
+  if (!id) return
+  replay(id)
+  document.querySelector(".workbench").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })
+})
 $("#run-form").addEventListener("submit", async (e) => {
   e.preventDefault()
   const mode = new FormData(e.target).get("mode")
@@ -330,6 +432,7 @@ function connectEvents() {
   })
 }
 
+await loadCatalog().catch(() => {})
 await loadRuns(false).catch((e) => ($("#run-meta").textContent = e.message))
 await loadLogs()
 await Promise.all([loadAttempts(), checkIntegrity(), loadLive()])

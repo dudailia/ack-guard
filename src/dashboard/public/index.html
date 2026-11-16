@@ -23,6 +23,33 @@
 </header>
 
 <main>
+  <section class="guided" id="guided" hidden aria-labelledby="guided-title">
+    <div class="guided-head">
+      <div>
+        <h2 id="guided-title">See it work in three steps</h2>
+        <p class="muted" id="guided-info">Runs live in the sandbox. No real money moves.</p>
+      </div>
+      <button id="guided-btn" type="button">Run the guided demo</button>
+    </div>
+    <ol class="guided-steps">
+      <li>
+        <h3>A legitimate purchase</h3>
+        <p class="what">The owner asks for tomorrow's Boston forecast. SkyCast Weather answers with a signed $0.25 ACK-Pay request.</p>
+        <p class="result" id="g1"></p>
+      </li>
+      <li>
+        <h3>An injected invoice</h3>
+        <p class="what">An email in the agent's inbox carries a $3.80 "overdue balance" payment request, signed by an attacker posing as SkyCast billing.</p>
+        <p class="result" id="g2"></p>
+      </li>
+      <li>
+        <h3>Someone rewrites the record</h3>
+        <p class="what">A copy of the signed log is edited so the blocked payment reads "allow", then verified.</p>
+        <p class="result" id="g3"></p>
+      </li>
+    </ol>
+  </section>
+
   <section class="score" aria-labelledby="score-title">
     <div class="score-head">
       <div>

@@ -91,6 +91,25 @@ select {
 main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; padding-bottom: 40px; }
 section { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 24px; }
 
+/* Guided demo */
+.guided { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
+.guided-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.guided-head h2 { font-size: 1.45rem; }
+#guided-btn { padding: 10px 18px; font-size: 1rem; }
+.guided-steps { list-style: none; counter-reset: g; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.guided-steps li { counter-increment: g; border: 1px solid var(--line); border-radius: 10px; padding: 16px; background: var(--paper); display: flex; flex-direction: column; gap: 8px; }
+.guided-steps li::before { content: "Step " counter(g); font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.guided-steps .what { color: var(--ink-2); font-size: 0.9rem; }
+.guided-steps .result { font-weight: 600; font-size: 0.95rem; min-height: 1.5em; }
+.guided-steps .result:empty { display: none; }
+.guided-steps .result.running { color: var(--muted); font-weight: 500; }
+.guided-steps .result.good { color: var(--green); }
+.guided-steps .result.stop { color: var(--red); }
+.guided-steps .result.warn { color: var(--amber); }
+.guided-steps li.done-good { border-color: var(--green); background: var(--green-bg); }
+.guided-steps li.done-stop { border-color: var(--red); background: var(--red-bg); }
+.result button.link { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; font-weight: 600; cursor: pointer; }
+
 /* Scoreboard */
 .score-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .score-head h2 { font-size: 1.45rem; max-width: 34ch; }
@@ -197,6 +216,7 @@ footer { padding-bottom: 32px; color: var(--muted); font-size: 0.8rem; }
 footer p { max-width: 90ch; }
 
 @media (max-width: 860px) {
+  .guided-steps { grid-template-columns: 1fr; }
   .top { flex-direction: column; align-items: flex-start; }
   .duel { grid-template-columns: 1fr; }
   .workbench { grid-template-columns: 1fr; }
