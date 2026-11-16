@@ -29,6 +29,12 @@ export interface VerifyReport {
   signerDid?: string
   /** True only when the expected signer came from outside the log (operator config or --signer). */
   pinned: boolean
+  /**
+   * The first position in the chain (0-based, equal to the seq an untouched
+   * entry there would have) where verification breaks. For an edited entry this
+   * is its seq; for a deletion or reorder, the first displaced position; for a
+   * truncated tail, the first missing position.
+   */
   firstBadSeq: number | null
   problems: VerifyProblem[]
 }
@@ -97,18 +103,23 @@ export async function verifyLog(
     const hp = headPath(path)
     const last = entries[entries.length - 1]
     if (!existsSync(hp)) {
-      problems.push({ seq: null, line: entries.length, kind: "head_missing", detail: "signed head checkpoint is missing" })
+      problems.push({ seq: null, line: entries.length + 1, kind: "head_missing", detail: "signed head checkpoint is missing" })
     } else {
-      const head = JSON.parse(readFileSync(hp, "utf8")) as { seq: number; hash: string; sig: string }
-      const payload = signerDid ? await sigOk(head.sig, signerDid, resolver) : null
+      let head: { seq: number; hash: string; sig: string }
+      try {
+        head = JSON.parse(readFileSync(hp, "utf8"))
+      } catch {
+        head = { seq: -1, hash: "", sig: "" }
+      }
+      const payload = signerDid && typeof head.sig === "string" ? await sigOk(head.sig, signerDid, resolver) : null
       // Require the head marker: an ordinary entry signature over {seq, hash}
       // must not be usable as a head checkpoint after truncating the log.
       if (!payload || payload.head !== true || payload.hash !== head.hash || payload.seq !== head.seq) {
-        problems.push({ seq: head.seq, line: entries.length, kind: "bad_head_signature", detail: "head checkpoint signature invalid" })
+        problems.push({ seq: head.seq, line: entries.length + 1, kind: "bad_head_signature", detail: "head checkpoint signature invalid" })
       } else if (!last || last.seq !== head.seq || last.hash !== head.hash) {
         problems.push({
           seq: last?.seq ?? null,
-          line: entries.length,
+          line: entries.length + 1,
           kind: "head_mismatch",
           detail: `log ends at seq ${last?.seq ?? "none"} but signed head is seq ${head.seq} (entries removed or appended without the guard key)`,
         })
@@ -116,7 +127,7 @@ export async function verifyLog(
     }
   }
 
-  const firstBad = problems.find((p) => p.seq !== null)?.seq ?? null
+  const firstBad = problems.length ? Math.min(...problems.map((p) => p.line)) - 1 : null
   return {
     ok: problems.length === 0,
     entries: entries.length,

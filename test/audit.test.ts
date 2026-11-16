@@ -69,7 +69,7 @@ describe("hash-chained signed audit log", () => {
     write(path, ls)
     const r = await verifyLog(path, { expectedSignerDid: ids.parties.guard.did })
     expect(r.ok).toBe(false)
-    expect(r.firstBadSeq).toBe(3)
+    expect(r.firstBadSeq).toBe(2)
   })
 
   it("detects tail truncation through the signed head checkpoint", async () => {
