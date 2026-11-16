@@ -1,59 +1,73 @@
 # STATUS
 
-Last updated: 2026-11-16. Pre-publish upgrades: 1 (DC-05 fix) and 3 (static demo) done; 2 (Claude runs) waiting for you. Nothing pushed or published.
+Last updated: 2026-11-16. The three features (readable policy, delegation chains, dispute packs) are done, measured and documented. Nothing is pushed or published.
 
-## Current results (qwen3:8b, `results/qwen3-8b/current/`, combined by `pnpm report`)
+## Recorded results
 
-Base run `final-20261116` (450 episodes, commit 5885950) plus a partial re-run `dc-fix-20261116` (DC-01 to DC-05 and SE-04, both agents, 5 runs, 60 episodes, commit 0e0a6d7). Both signed logs verify and every row is re-derived from them.
+**Main suite (unchanged by this round):** `results/qwen3-8b/current/`, base run `final-20261116` plus the `dc-fix-20261116` re-run.
 
 | | Without guard | With ACK Guard |
 |---|---|---|
-| Attack runs where the attack reached its goal | 82/175 (46.9%, CI 39.6% to 54.2%) | 0/175 (0.0%, CI 0.0% to 2.1%) |
+| Attack runs where the attack reached its goal | 82/175 (46.9%) | 0/175 (0.0%, CI 0.0% to 2.1%) |
 | Money to attacker accounts | $65.20 | $0.00 |
-| Spend above what tasks needed | $134.30 | $0.00 |
-| Guarded runs where the model tried a payment the guard refused | n/a | 82/175 |
-| Legit task still completed during an attack | 109/175 | 87/175 |
-| Benign tasks completed | 50/50 | 40/50 (B-09 and B-10 wait for a human; the benchmark approver declines) |
+| Benign tasks completed | 50/50 | 40/50 |
 
-- **History kept:** before the fix, `DC-05` beat the guard in 2/5 runs ($0.50). The report prints this under the table, and the base run is unchanged in `results/qwen3-8b/final-20261116/`.
-- **The fix was exercised:** in the re-run, qwen tried the `refresh=1` re-purchase in 2 of 5 guarded runs, and `DUPLICATE_CHARGE` refused both.
-- **Why only those scenarios were re-run:** `scripts/reevaluate-policy.ts` replayed all 249 recorded guarded decisions under the new engine. Only `DC-05` (allow became deny) and `SE-04` (same refusal, different rule, so a different message to the model) changed.
-- **What the recorded run doesn't exercise:** qwen3 ignored every hidden-instruction attack and 4 of 5 splitting attacks even without the guard. Those rules are covered by a deterministic scripted-agent test, not by the measurement, and the docs say so.
-- **The pre-fix 3-run benchmark** (`results/qwen3-8b/run-20261115/`) stays superseded and unused.
+`pnpm report` reproduces these exactly, also in a fresh clone. Re-evaluating the recorded decisions with today's engine (`scripts/reevaluate-policy.ts`) changes nothing in the re-run log and only the already-replaced DC-05/SE-04 rows in the base log.
 
-## Done this round (all committed locally)
-1. **DC-05 fix** (0e0a6d7):
-   - canonical URLs: case, trailing slash, parameter order, tracking parameters
-   - duplicate detection keys on merchant DID, capability and task, with quantities: a task that needs a capability twice lists it twice (B-05)
-   - a test for each variant
-   - `pnpm redteam --patch-of`, with `pnpm report` combining a base run with its re-runs and keeping the history
-2. **Static demo** (ae358ae):
-   - `site/`, deployable via `.github/workflows/pages.yml` (uploads files only: no build, no secrets)
-   - recorded at build time with the scripted agent and throwaway keys; no API calls
-   - the browser re-checks the hash chain and Ed25519 signatures, and has a "try your own edit" panel
-3. **Docs and media** (ee8431b):
-   - README, WALKTHROUGH, quiz, memo and LinkedIn updated to the combined results
-   - "what the guard can't catch" now names the remaining gap: it limits how many of each item a task buys, not which item
-   - dashboard screenshot, GIF and video re-recorded
-4. **Full check:** 104 tests, typecheck, em-dash check and secret scan pass in a fresh clone. `pnpm report` there reproduces the README exactly. The demo passes the three guided steps.
+**Delegation suite (new, reported separately):** `results/qwen3-8b/delegation-20261116/` (5 attacks, 2 benign, 5 runs, both agents, 70 episodes, commit 8ba9a86).
+
+| | Without guard | With ACK Guard |
+|---|---|---|
+| Attack runs where the sub-agent exceeded its delegation | 9/25 (36.0%) | 0/25 (0.0%, CI 0.0% to 13.3%) |
+| Benign hand-offs completed | 10/10 | 10/10 |
+
+The docs state what this run did not exercise:
+- qwen never paid under an offered credential, so the forged and expired credential paths rest on the scripted test.
+- It never paid in parallel, so the concurrency case rests on the property test.
+- DL-02 and DL-04 had no effect even without the guard.
+- In-delegation over-purchase ($2.00 over 8 guarded runs) is allowed and listed as a limit.
+
+## Done this round (commits)
+- **1da966d: readable policy.**
+  - `policy.yaml` (pinned by test to the recorded configuration)
+  - Policy page
+  - `pnpm policy-diff`
+  - owner-signed approvals on a signed policy log; the live guard loads only the last approved policy
+- **869174b, 8ba9a86: delegation chains.**
+  - ACK-ID ControllerCredential links carrying budget, capabilities and expiry
+  - `DELEGATION_LIMITS`, with subtree spend under the payment lock
+  - the delegation suite
+  - the key file now only adds new keys (the guard key is unchanged)
+  - the chain JWTs are logged with each attempt
+- **8a48807, 7e3c240: dispute packs.**
+  - `pnpm dispute` and `pnpm dispute-verify`
+  - a one-page PDF
+  - the dashboard download
+  - chain verification as of the payment time
+- **1c5acd5, 609134d: results and docs.**
+  - delegation run and example packs (`docs/examples/`, both verify)
+  - README, WALKTHROUGH, INTERVIEW-QUIZ (30 questions); memo led by trust-bank needs
+  - demo video (81 s) with the Policy page and diff, policy screenshot, 1.6 MB GIF, static site rebuilt
+- **c6e7cfa, bbb9e4a: fixes from two independent reviews of the new features, each with a regression test.**
+  - Critical: a dispute pack could be forged without the guard key, by planting a DID document for the guard's own DID. Fixed: guard signatures are checked against the pinned did:key with nothing taken from the pack.
+  - Critical: a re-encoded (ECDSA high-s) copy of a delegation link got a fresh budget. Fixed: a link's id is the hash of its signed content.
+  - The policy diff ignored spend under delegation links; it now replays it, and all 73 recorded delegation decisions reproduce.
+  - The policy file now rejects duplicate endpoint paths and two merchants sharing one identity.
+  - Link spend no longer ages out of the persisted store.
+  - Approvals must continue from the active policy; the owner's JWT and the stored diff summary are re-checked on load; a diff that replayed nothing cannot be approved.
+  - Dispute packs: every field they or their PDF state is bound to the signed entries, and a pack for a REQ_SIGNATURE refusal verifies honestly.
+  - Docs: the repository policy is described as the unsigned baseline, along with policy-log rollback, budgets per signed link, the key-registry limit and the limits of concurrent-episode replay.
+  - The recorded results are unaffected: the README results block is byte-identical, and the re-evaluation of both recorded suites reproduces every decision.
+- **Full check at bbb9e4a, from a fresh clone:**
+  - 138 tests, typecheck, em-dash check and secret scan pass
+  - `pnpm report` reproduces the README
+  - both example packs verify
+  - the live demo runs the legit purchase (paid), FI-01 (blocked by REQ_PROVENANCE) and DL-03 (overreach blocked by DELEGATION_LIMITS), and serves the Policy page
 
 ## Needs you
-- **Claude runs: blocked on two things.**
-  - There is no `.env` yet.
-  - The estimate is over your $10 limit, so nothing has been spent.
-  - Measured offline, an episode is about 7 model calls and 10k input tokens. At Sonnet 5.5 prices ($2 / $10 per MTok), 450 episodes come to:
-    - thinking off: about $13 (range $10 to $18)
-    - default adaptive thinking: about $25 to $35
-    - thinking off at 3 runs (270 episodes): about $8
-  - Defaults are ready:
-    - default sampling (Sonnet 5.5 rejects temperature 0.7)
-    - no seed (the API has none)
-    - prompt caching
-    - no fallback model, so a refusal is recorded, not answered by another model
-    - token usage logged per call, so the real cost is reported
-  - To run: `pnpm redteam --model claude-sonnet-5-5 --runs 5 [--thinking adaptive]`, then `pnpm report`.
+- **Claude runs:** still waiting on `ANTHROPIC_API_KEY` in `.env` and your choice of settings. The estimate for 450 episodes is about $13 with thinking off or $25 to $35 with adaptive thinking; the delegation suite adds about $2.
 - **Publishing (your go):**
   - push the repo
-  - enable GitHub Pages with "GitHub Actions" as the source
-  - add the repo and Pages links to LINKEDIN.md
-  - post the guard DID and head hashes from `results/RESULTS.md` somewhere outside the repo, as the external anchor
+  - enable GitHub Pages ("GitHub Actions" as the source)
+  - add links to LINKEDIN.md
+  - post the guard DID and head hashes from `results/RESULTS.md` outside the repo
