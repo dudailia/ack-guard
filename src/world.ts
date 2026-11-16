@@ -249,7 +249,8 @@ export class World {
       paymentRequestToken: token,
       paymentOptionId: input.paymentOptionId ?? null,
       agentPurpose: input.purpose,
-      ...(this.setup.delegation ? { payer: this.payerDid, credentialRef: input.credential ?? null } : {}),
+      // The exact chain this payment is made under (JWTs), so anyone can re-verify it from the log.
+      ...(this.setup.delegation ? { payer: this.payerDid, credentialRef: input.credential ?? null, delegationChain: this.chainFor(input) } : {}),
     })
     const first = await this.spend.run(() => this.decideAndSettle(input, base))
     if (first.kind === "done") return first.result
