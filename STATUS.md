@@ -30,7 +30,7 @@ Last updated: 2026-11-16, early morning. Overnight hardening plan: steps 1 to 7 
   - verification could fetch a `did:web` named by a forged log (DID resolution is now network-free)
   - docs: a revocation claim (removed), key custody (added to limits), "the model was fooled in 80 runs" (20 of those were compromised merchants), the receipt listed as a policy input
 - Code changed after 5885950 touches the benchmark path only when an audit log write fails, which never happened in the recorded run (0 errors). The README says so. Everything else is demo, dashboard, verification or docs.
-- Full check at 6b11679: 84 tests, typecheck, em-dash check and secret scan pass in a fresh clone. From that clone, `pnpm demo` (qwen3) passes all three steps: a paid legit purchase, the injected invoice blocked by REQ_PROVENANCE, and the tamper detected at entry 15. Replay and verify-log (anchored to the final head hash) also pass.
+- Full check at 6b11679: 84 tests, typecheck, em-dash check and secret scan pass in a fresh clone. From that clone, `pnpm demo` (qwen3) ran the three guided steps through its API: the legit purchase was paid, the injected invoice was blocked by REQ_PROVENANCE, and the tamper was detected at entry 15. Replay and verify-log (anchored to the final head hash) passed from a fresh clone of 9d4a6cd.
 
 ## Needs you
 - **Claude runs** need `ANTHROPIC_API_KEY` in `.env` (gitignored). Then run `pnpm redteam --model claude-sonnet-5-5 --runs 5` and `pnpm report`.
