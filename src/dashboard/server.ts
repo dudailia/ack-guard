@@ -84,7 +84,7 @@ export function createDashboard(opts: DashboardOptions) {
   app.get("/", (c) => c.html(readFileSync(join(PUBLIC, "index.html"), "utf8")))
 
   app.get("/api/runs", (c) => {
-    const runs: { path: string; model: string; summary: unknown; meta: unknown }[] = []
+    const runs: { path: string; model: string; summary: unknown; meta: unknown; verification: unknown }[] = []
     const base = join(root, "results")
     if (existsSync(base)) {
       for (const model of readdirSync(base)) {
@@ -95,11 +95,13 @@ export function createDashboard(opts: DashboardOptions) {
           const s = join(mdir, run, "summary.json")
           if (!existsSync(s)) continue
           const metaPath = join(mdir, run, "meta.json")
+          const verPath = join(mdir, run, "verification.json")
           runs.push({
             path: rel(join(mdir, run)),
             model,
             summary: JSON.parse(readFileSync(s, "utf8")),
             meta: existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, "utf8")) : null,
+            verification: existsSync(verPath) ? JSON.parse(readFileSync(verPath, "utf8")) : null,
           })
         }
       }

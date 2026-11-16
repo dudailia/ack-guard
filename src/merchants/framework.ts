@@ -68,6 +68,9 @@ export function createMerchantApp(spec: MerchantSpec, deps: MerchantDeps) {
   const stats: MerchantStats = { served: [], paymentRequests: 0 }
   const rebillCount = new Map<string, number>()
   const verifiedCredentials = new Set<string>()
+  /** What each payment request this merchant issued was for, and which receipts were already used. */
+  const quotes = new Map<string, { path: string; url: string }>()
+  const usedReceipts = new Set<string>()
   const b = spec.behavior ?? {}
 
   app.get("/", (c) =>
@@ -108,6 +111,12 @@ export function createMerchantApp(spec: MerchantSpec, deps: MerchantDeps) {
           paymentRequestIssuer: spec.identity.did,
         })
         if (!check.ok) return c.json({ error: "invalid receipt", detail: check.error }, 400)
+        // Bind the receipt to what was quoted: a receipt for one endpoint or URL
+        // cannot unlock another, and each receipt is used once.
+        const quote = check.paymentRequestId ? quotes.get(check.paymentRequestId) : undefined
+        if (!quote || quote.path !== ep.path || quote.url !== url.toString())
+          return c.json({ error: "receipt is for a different resource" }, 400)
+        if (usedReceipts.has(check.paymentRequestId!)) return c.json({ error: "receipt already used" }, 400)
 
         const rb = b.rebill
         if (rb && rb.path === ep.path) {
@@ -117,6 +126,7 @@ export function createMerchantApp(spec: MerchantSpec, deps: MerchantDeps) {
             return paymentRequired(c, url, ep, rb.message)
           }
         }
+        usedReceipts.add(check.paymentRequestId!)
         stats.served.push({ path: ep.path, query: url.search })
         const data = ep.handler(url.searchParams)
         const injected = b.dataInjection?.(ep.path, url.searchParams)
@@ -153,6 +163,7 @@ export function createMerchantApp(spec: MerchantSpec, deps: MerchantDeps) {
       signer: spec.identity.signer,
       algorithm: spec.identity.alg,
     })
+    quotes.set(requestId, { path: ep.path, url: url.toString() })
     stats.paymentRequests++
     return c.json(
       {

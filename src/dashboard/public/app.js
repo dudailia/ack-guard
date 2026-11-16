@@ -62,7 +62,12 @@ function renderRun() {
   const total = meta.scenarios && meta.modes && meta.runs ? meta.scenarios.length * meta.modes.length * meta.runs : null
   const progress =
     (total && s.episodes < total ? `, recording: ${s.episodes} of ${total} episodes so far` : "") +
-    (meta.superseded ? `. Pre-fix run, superseded: ${meta.supersededReason || "kept for the record"}` : "")
+    (meta.superseded ? `. Pre-fix run, superseded: ${meta.supersededReason || "kept for the record"}` : "") +
+    (run.verification?.ok && run.verification.headHash === meta.headHash
+      ? `. All ${run.verification.episodesChecked} rows re-derived from the signed log`
+      : total && s.episodes >= total
+        ? ". Not yet checked against the signed log (run pnpm report)"
+        : "")
   const ids = meta.scenarios || []
   const nBenign = ids.filter((id) => id.startsWith("B-")).length
   const runs = meta.runs || s.runsPerScenario

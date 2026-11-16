@@ -162,3 +162,116 @@ describe("runner: one run never mixes code versions", () => {
     await expect(runSuite({ ids, scenarios, model: resolveModel("scripted"), runs: 2, outDir })).rejects.toThrow(/refusing to resume/)
   })
 })
+
+// ------------------------------------------------------------ review round 3
+
+describe("review 3: duplicate detection cannot be dodged with ports or schemes", () => {
+  it("port and scheme variants of one URL are one purchase; non-http schemes are refused", async () => {
+    expect(normalizeUrl("HTTP://SkyCast.test:8080/forecast?city=Boston")).toBe(normalizeUrl("skycast.test/forecast?city=Boston"))
+    expect(normalizeUrl("https://skycast.test:1/forecast?city=Boston")).toBe(normalizeUrl("http://skycast.test/forecast?city=Boston"))
+    expect(() => normalizeUrl("foo://skycast.test/forecast?city=Boston")).toThrow(/unsupported URL scheme/)
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: ["weather.forecast"], budget: usd(5) } }, "guarded", audit, "ep-ports")
+    const variants = ["http://skycast.test/forecast?city=Boston", "http://skycast.test:8080/forecast?city=Boston", "https://skycast.test:1/forecast?city=Boston", "foo://skycast.test/forecast?city=Boston", "x-y://skycast.test/forecast?city=Boston"]
+    for (const u of variants) {
+      const r = (await w.httpGetForAgent(u)) as { payment_request?: string }
+      if (r.payment_request) await w.pay({ paymentRequest: r.payment_request, purpose: "forecast" })
+    }
+    expect(w.ledger.transfers.length).toBe(1)
+  })
+})
+
+describe("review 3: an emptied or deleted log cannot be restarted", () => {
+  it("AuditLog.open refuses when a signed head exists but the entries are gone", async () => {
+    const { ids, path } = await paidAndBlockedLog()
+    writeFileSync(path, "")
+    await expect(AuditLog.open(path, ids.parties.guard)).rejects.toThrow(/entries were deleted/)
+  })
+})
+
+describe("review 3: approvals and task instances in the live demo", () => {
+  it("a pending human approval does not hold up other payments", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const store = new SpendStore()
+    let release!: (v: { approved: boolean; by: string }) => void
+    const slowHuman = () => new Promise<{ approved: boolean; by: string }>((r) => (release = r))
+    const a = new World(ids, { task: { id: "a", prompt: "", needs: ["weather.history"], budget: usd(5) } }, "guarded", audit, "ep-a", slowHuman, store)
+    const b = new World(ids, { task: { id: "b", prompt: "", needs: ["weather.forecast"], budget: usd(5) } }, "guarded", audit, "ep-b", undefined, store)
+    const ra = (await a.httpGetForAgent("http://skycast.test/history?city=Boston")) as { payment_request: string }
+    const pending = a.pay({ paymentRequest: ra.payment_request, purpose: "history" })
+    await new Promise((r) => setTimeout(r, 50))
+    const rb = (await b.httpGetForAgent("http://skycast.test/forecast?city=Boston")) as { payment_request: string }
+    const paidB = await b.pay({ paymentRequest: rb.payment_request, purpose: "forecast" })
+    expect(paidB.status).toBe("paid")
+    release({ approved: true, by: "owner" })
+    expect((await pending).status).toBe("paid")
+  })
+
+  it("the same scenario run twice as two task instances is not a duplicate charge", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const store = new SpendStore()
+    for (const n of [1, 2]) {
+      const w = new World(ids, { task: { id: `B-01#${n}`, prompt: "", needs: ["weather.forecast"], budget: usd(1) } }, "guarded", audit, `ep-${n}`, undefined, store)
+      const r = (await w.httpGetForAgent("http://skycast.test/forecast?city=Boston")) as { payment_request: string }
+      expect((await w.pay({ paymentRequest: r.payment_request, purpose: "forecast" })).status).toBe("paid")
+    }
+  })
+})
+
+describe("review 3: merchants bind receipts to what was quoted", () => {
+  it("a receipt for /alerts cannot unlock /history, and a receipt works once", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const w = new World(ids, { task: { id: "t", prompt: "", needs: ["weather.alerts"], budget: usd(1) } }, "naive", audit, "ep-bind")
+    const r = (await w.httpGetForAgent("http://skycast.test/alerts?city=Boston")) as { payment_request: string }
+    await w.pay({ paymentRequest: r.payment_request, purpose: "alerts" })
+    const receipt = (audit.entries.find((e) => e.kind === "receipt")!.payload.receipt as string)
+    const headers = { "x-ack-controller-credential": ids.controllerCredential, authorization: `Bearer ${receipt}` }
+    expect((await w.net.fetch("http://skycast.test/history?city=Boston", { headers })).status).toBe(400)
+    expect((await w.net.fetch("http://skycast.test/alerts?city=Boston", { headers })).status).toBe(200)
+    expect((await w.net.fetch("http://skycast.test/alerts?city=Boston", { headers })).status).toBe(400)
+  })
+})
+
+describe("review 3: reported numbers are backed by the signed log", () => {
+  it("verifyRun re-derives every row from the log, and catches edited rows, swapped logs and missing logs", async () => {
+    const { verifyRun } = await import("../src/redteam/verify-run.js")
+    const ids = await testIdentities()
+    const outDir = dirname(tmpLogPath())
+    await runSuite({ ids, scenarios: selectScenarios("FI-01,DC-05,B-01"), model: resolveModel("scripted"), runs: 1, outDir })
+    const ok = await verifyRun(outDir)
+    expect(ok.problems).toEqual([])
+    expect(ok.episodesChecked).toBe(6)
+
+    // Edit a row: claim the guarded DC-05 attack failed.
+    const epPath = join(outDir, "episodes.jsonl")
+    const original = readFileSync(epPath, "utf8")
+    writeFileSync(epPath, original.replace(/("scenarioId":"DC-05".*?"mode":"guarded".*?"attackSucceeded":)true/, "$1false"))
+    const edited = await verifyRun(outDir)
+    expect(edited.ok).toBe(false)
+    expect(edited.problems.join(" ")).toMatch(/attackSucceeded/)
+    writeFileSync(epPath, original)
+
+    // Swap in another run's (validly signed) log.
+    const other = dirname(tmpLogPath())
+    await runSuite({ ids, scenarios: selectScenarios("FI-01,DC-05,B-01"), model: resolveModel("scripted"), runs: 1, outDir: other })
+    copyFileSync(join(other, "audit.jsonl"), join(outDir, "audit.jsonl"))
+    copyFileSync(headPath(join(other, "audit.jsonl")), headPath(join(outDir, "audit.jsonl")))
+    const swapped = await verifyRun(outDir)
+    expect(swapped.ok).toBe(false)
+    expect(swapped.problems.join(" ")).toMatch(/runId|head/)
+  })
+
+  it("the runner refuses to resume when rows exist but the log is gone", async () => {
+    const ids = await testIdentities()
+    const outDir = dirname(tmpLogPath())
+    await runSuite({ ids, scenarios: selectScenarios("B-01"), model: resolveModel("scripted"), runs: 1, outDir })
+    const { rmSync } = await import("node:fs")
+    rmSync(join(outDir, "audit.jsonl"))
+    rmSync(headPath(join(outDir, "audit.jsonl")))
+    await expect(runSuite({ ids, scenarios: selectScenarios("B-01"), model: resolveModel("scripted"), runs: 2, outDir })).rejects.toThrow(/audit log is missing/)
+  })
+})

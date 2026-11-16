@@ -75,7 +75,10 @@ async function run(scenarioId: string, mode: Mode) {
   const scenario = scenarios.find((s) => s.id === scenarioId)
   if (!scenario) throw new Error(`unknown scenario ${scenarioId}`)
   const episodeId = `live-${Date.now().toString(36)}-${++episodeCounter}/${scenarioId}/${mode}`
-  const setup = await scenario.build(ctx)
+  const built = await scenario.build(ctx)
+  // Each live episode is its own task instance, so running the same scenario
+  // twice is two tasks (not a duplicate charge within one task).
+  const setup = { ...built, task: { ...built.task, id: `${built.task.id}#${episodeCounter}` } }
   const done = runEpisode({
     ids,
     setup,

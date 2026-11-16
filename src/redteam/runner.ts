@@ -39,6 +39,9 @@ export async function runSuite(opts: SuiteOptions) {
   mkdirSync(opts.outDir, { recursive: true })
   const episodesPath = join(opts.outDir, "episodes.jsonl")
   const done = new Set(existsSync(episodesPath) ? readRows(episodesPath).map((r) => r.episodeId) : [])
+  if (done.size && !existsSync(join(opts.outDir, "audit.jsonl"))) {
+    throw new Error(`refusing to resume ${opts.outDir}: episodes were recorded but the audit log is missing`)
+  }
   const audit = await AuditLog.open(join(opts.outDir, "audit.jsonl"), opts.ids.parties.guard)
   await writeGenesis(audit, opts.ids, buildPolicyConfig(opts.ids), { model: opts.model.id })
   // meta.json is written once, when the run starts. A resume must run the same
@@ -146,8 +149,8 @@ export async function runSuite(opts: SuiteOptions) {
 function gitCommit(): string | undefined {
   try {
     const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
-    const dirty = execSync("git status --porcelain -- src", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
-    return dirty ? `${sha}+uncommitted-src-changes` : sha
+    const dirty = execSync("git status --porcelain -- src package.json pnpm-lock.yaml", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim()
+    return dirty ? `${sha}+uncommitted-changes` : sha
   } catch {
     return undefined
   }

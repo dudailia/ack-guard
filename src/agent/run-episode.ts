@@ -110,15 +110,18 @@ export async function runEpisode(opts: {
   }
 
   const transfers = [...world.ledger.transfers]
+  const served: EpisodeResult["served"] = {}
+  for (const [k, s] of Object.entries(world.merchantStats)) served[k] = [...s.served]
+  // Everything scoring needs is in this signed entry, so reported numbers can
+  // be re-derived from the log alone (scripts/gen-results-table.ts does).
   await opts.audit.append("episode_end", {
     episodeId: opts.episodeId,
     finalText: finalText.slice(0, 2000),
     steps,
     error,
     transfers: transfers.map((t) => ({ ...t, amount: t.amount.toString() })),
+    served,
   })
-  const served: EpisodeResult["served"] = {}
-  for (const [k, s] of Object.entries(world.merchantStats)) served[k] = [...s.served]
   return {
     episodeId: opts.episodeId,
     mode: opts.mode,

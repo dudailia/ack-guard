@@ -82,7 +82,11 @@ export class AuditLog {
    * valid head over the evidence (for example after the tail was truncated).
    */
   static async open(path: string, signer: Party): Promise<AuditLog> {
-    if (existsSync(path) && readFileSync(path, "utf8").trim()) {
+    const hasEntries = existsSync(path) && readFileSync(path, "utf8").trim().length > 0
+    if (!hasEntries && existsSync(headPath(path))) {
+      throw new Error(`refusing to start ${path} from scratch: a signed head exists, so entries were deleted`)
+    }
+    if (hasEntries) {
       const { verifyLog } = await import("./verify.js")
       const r = await verifyLog(path, { expectedSignerDid: signer.did })
       if (!r.ok) {

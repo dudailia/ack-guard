@@ -85,7 +85,7 @@ A pure function: `(facts, task, config, history, now) -> decision`. No I/O, no r
 Why each rule exists, and the attack it was built for:
 
 - `REQ_SIGNATURE`: you cannot pay something whose integrity you cannot check.
-- `AGENT_IDENTITY`: the guard acts for a specific owner and refuses to spend for an agent whose ControllerCredential does not chain to that owner.
+- `AGENT_IDENTITY`: the guard acts for a specific owner and refuses to spend for an agent whose ControllerCredential does not chain to that owner. It is re-checked on every payment. It guards against a misconfigured, wrong or revoked credential; injected text cannot change the credential, so this rule is not what stops injection attacks.
 - `REQ_PROVENANCE`: the single most effective rule against fake invoices and hidden instructions. A legitimate purchase in ACK-Pay starts with *you* calling a service and *it* answering 402. A payment request that shows up in an email body, a web page or a JSON field is not a quote for something you asked for. The guard knows the difference because it sits in the HTTP client.
 - `MERCHANT_ALLOWLIST`: identity is the DID, not the display name. The impostor can call itself "SkyCast Weather"; it cannot sign as SkyCast. The rule also refuses a genuine SkyCast token served from someone else's host.
 - `RECIPIENT_BINDING`: a valid merchant signature does not prove the payout account is right; servers get compromised and configs get edited. The operator registers the payout account out of band.
@@ -205,7 +205,7 @@ pnpm replay                                # list attempts in the newest log
 pnpm verify-log --log results/qwen3-8b/<run>/audit.jsonl
 ```
 
-To see tamper detection by hand: edit any character inside a `payload` in a log under `.data/live/`, then run `pnpm verify-log --log <that file>`. It prints the exact entry.
+To see tamper detection by hand: change any value inside a `payload` in a log under `.data/live/` (an amount, a rule id, a word), then run `pnpm verify-log --log <that file>`. It prints the exact entry. Hashes are computed over canonical JSON, so a rewrite that leaves the JSON's meaning identical (re-escaping a character, writing `0` as `0.0`) is not a change and is not reported.
 
 ## 4b. How the tests are built
 
@@ -221,7 +221,7 @@ To see tamper detection by hand: edit any character inside a `payload` in a log 
 
 **Why not just tell the model to be careful?** Because the model is the component being attacked, and its compliance is probabilistic. The system prompt already says "Only spend money on what the user's task needs", identically for both agents. The naive results show how far that gets you.
 
-**Is the guard just an allowlist?** No. An allowlist alone would miss a compromised legit merchant (`RECIPIENT_BINDING`), price games from a legit merchant (`PRICE_BINDING`), off-purpose upsells from a legit merchant (`PURPOSE_BINDING`), re-billing (`DUPLICATE_CHARGE`) and splitting (`TASK_BUDGET`, `DAILY_CAP`). In the results, most categories are stopped by a rule other than the allowlist.
+**Is the guard just an allowlist?** No. An allowlist alone would miss a compromised legit merchant (`RECIPIENT_BINDING`), price games from a legit merchant (`PRICE_BINDING`), off-purpose upsells from a legit merchant (`PURPOSE_BINDING`), re-billing (`DUPLICATE_CHARGE`) and splitting (`TASK_BUDGET`, `DAILY_CAP`). The README's category table shows which rule stopped each category in the recorded run.
 
 **What can the guard not stop?** Purchases that are fully in policy but unnecessary (`DC-05`, `HI-05`). Damage is bounded by the task budget, not prevented. Also anything the operator misconfigures, since the registry is trusted. And payments that bypass `pay()` entirely; in a real deployment the wallet keys would live with the guard, not with the agent.
 

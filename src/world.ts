@@ -134,7 +134,12 @@ export class World {
 
   /** HTTP GET through the sandbox, presenting ACK-ID and any receipt held for this URL. */
   async httpGet(rawUrl: string): Promise<{ status: number; url: string; body: unknown }> {
-    const url = normalizeUrl(rawUrl)
+    let url: string
+    try {
+      url = normalizeUrl(rawUrl)
+    } catch (e) {
+      return { status: 400, url: rawUrl, body: { error: (e as Error).message } }
+    }
     const headers: Record<string, string> = { "x-ack-controller-credential": this.ids.controllerCredential }
     const receipt = this.receiptsByUrl.get(url)
     if (receipt) headers.authorization = `Bearer ${receipt}`
@@ -183,15 +188,11 @@ export class World {
    * must see every earlier payment (duplicate, budget and daily-cap rules),
    * including payments made by other episodes that share the store.
    */
-  pay(input: PayInput): Promise<PayResult> {
-    return this.spend.run(() => this.payOne(input))
-  }
-
-  private async payOne(input: PayInput): Promise<PayResult> {
+  async pay(raw: PayInput): Promise<PayResult> {
     const attemptId = `${this.episodeId}#${++this.attemptCounter}`
     const base = { episodeId: this.episodeId, attemptId, mode: this.mode }
-    const token = this.resolvePaymentRequest(input.paymentRequest)
-    input = { ...input, paymentRequest: token }
+    const token = this.resolvePaymentRequest(raw.paymentRequest)
+    const input = { ...raw, paymentRequest: token }
     await this.audit.append("payment_attempt", {
       ...base,
       paymentRequestRef: this.tokenToRef.get(token) ?? null,
@@ -199,37 +200,59 @@ export class World {
       paymentOptionId: input.paymentOptionId ?? null,
       agentPurpose: input.purpose,
     })
+    const first = await this.spend.run(() => this.decideAndSettle(input, base))
+    if (first.kind === "done") return first.result
 
-    const facts = await this.gatherFacts(input)
+    // A human is needed. Wait OUTSIDE the payment lock, so one pending approval
+    // never stalls the agent's other payments, then decide again from scratch
+    // inside the lock with the approval as a fact (history may have changed).
+    const approval = await this.approver({ decision: first.decision, facts: first.facts, task: this.task })
+    await this.audit.append("approval", { ...base, ...approval })
+    if (!approval.approved) {
+      const result: PayResult = {
+        status: "escalated_denied",
+        rule: first.decision.rule.id,
+        reason: first.decision.rule.detail,
+        message: "A human reviewer declined this payment. Do not retry it.",
+      }
+      this.outcomes.push({ attemptId, result, decision: first.decision })
+      return result
+    }
+    const second = await this.spend.run(() => this.decideAndSettle(input, base, approval))
+    if (second.kind === "done") return second.result
+    // Approved, yet the re-check still asks for a human: treat as declined.
+    const result: PayResult = {
+      status: "escalated_denied",
+      rule: second.decision.rule.id,
+      reason: second.decision.rule.detail,
+      message: "This payment still needs approval. Do not retry it.",
+    }
+    this.outcomes.push({ attemptId, result, decision: second.decision })
+    return result
+  }
+
+  /** Runs inside the payment lock: gather facts, decide, and settle if allowed. */
+  private async decideAndSettle(
+    input: PayInput,
+    base: { episodeId: string; attemptId: string; mode: Mode },
+    approval?: { approved: boolean; by: string },
+  ): Promise<{ kind: "done"; result: PayResult } | { kind: "needs_approval"; decision: Decision; facts: PaymentFacts }> {
+    const attemptId = base.attemptId
+    const facts = { ...(await this.gatherFacts(input)), ...(approval ? { approval } : {}) }
     let decision: Decision | undefined
     if (this.mode === "guarded") {
       decision = evaluatePayment(facts, this.task, this.policy, this.history, Date.now())
-      await this.audit.append("decision", { ...base, decision, facts: factsForLog(facts) })
-      if (decision.outcome === "needs_approval") {
-        const approval = await this.approver({ decision, facts, task: this.task })
-        await this.audit.append("approval", { ...base, ...approval })
-        if (approval.approved) {
-          decision = evaluatePayment({ ...facts, approval }, this.task, this.policy, this.history, Date.now())
-          await this.audit.append("decision", { ...base, decision, facts: factsForLog({ ...facts, approval }), afterApproval: true })
+      await this.audit.append("decision", { ...base, decision, facts: factsForLog(facts), ...(approval ? { afterApproval: true } : {}) })
+      if (decision.outcome === "needs_approval") return { kind: "needs_approval", decision, facts }
+      if (decision.outcome === "deny") {
+        const result: PayResult = {
+          status: "blocked",
+          rule: decision.rule.id,
+          reason: decision.rule.detail,
+          message: `Payment blocked by policy rule ${decision.rule.id}. Do not retry it.`,
         }
-      }
-      if (decision.outcome !== "allow") {
-        const result: PayResult =
-          decision.outcome === "needs_approval"
-            ? {
-                status: "escalated_denied",
-                rule: decision.rule.id,
-                reason: decision.rule.detail,
-                message: "A human reviewer declined this payment. Do not retry it.",
-              }
-            : {
-                status: "blocked",
-                rule: decision.rule.id,
-                reason: decision.rule.detail,
-                message: `Payment blocked by policy rule ${decision.rule.id}. Do not retry it.`,
-              }
         this.outcomes.push({ attemptId, result, decision })
-        return result
+        return { kind: "done", result }
       }
     } else {
       await this.audit.append("decision", {
@@ -238,7 +261,16 @@ export class World {
         facts: factsForLog(facts),
       })
     }
+    return { kind: "done", result: await this.settle(input, base, facts, decision) }
+  }
 
+  private async settle(
+    input: PayInput,
+    base: { episodeId: string; attemptId: string; mode: Mode },
+    facts: PaymentFacts,
+    decision: Decision | undefined,
+  ): Promise<PayResult> {
+    const attemptId = base.attemptId
     // Settlement: both modes need a validly signed request with a real option.
     if (!facts.requestSignature.ok || !facts.option) {
       const result: PayResult = { status: "error", message: `Cannot pay: ${facts.requestSignature.error ?? "payment option not found"}` }
@@ -412,15 +444,26 @@ function factsForLog(f: PaymentFacts) {
 }
 
 /**
- * Canonical form of a URL, used both for fetching and as the key for
- * provenance and duplicate detection: lowercase host, no fragment, query
- * parameters decoded and sorted. So "?b=2&a=1#x" and "?a=1&b=2" are the same
- * purchase. (Adding a new parameter still makes a different URL; see DC-05.)
+ * Canonical form of a URL, used for fetching and as the key for provenance
+ * and duplicate detection:
+ * - only http and https are accepted, and both become http
+ * - the port is dropped (sandbox hosts are routed by name, so ports are aliases)
+ * - the host is lowercased, the fragment is dropped
+ * - query parameters are decoded and sorted
+ *
+ * So "HTTP://SkyCast.test:8080/forecast?b=2&a=1#x" and
+ * "skycast.test/forecast?a=1&b=2" are the same purchase. A different
+ * parameter set (an added "refresh=1", or a value in different letter case)
+ * is still a different URL to the guard; see DC-05.
  */
 export function normalizeUrl(raw: string): string {
   const s = raw.trim()
-  const u = new URL(s.includes("://") ? s : `http://${s}`)
+  const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `http://${s}`)
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`unsupported URL scheme ${u.protocol}`)
   u.protocol = "http:"
+  u.port = ""
+  u.username = ""
+  u.password = ""
   u.hash = ""
   const params = [...u.searchParams.entries()].sort(([a, av], [b, bv]) => (a === b ? av.localeCompare(bv) : a.localeCompare(b)))
   u.search = ""
