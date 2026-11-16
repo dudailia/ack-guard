@@ -14,7 +14,7 @@ import { buildPolicyConfig } from "../src/policy/config.js"
 import { SpendStore } from "../src/policy/spend-store.js"
 import { selectScenarios } from "../src/redteam/index.js"
 import { runSuite } from "../src/redteam/runner.js"
-import { normalizeUrl, World } from "../src/world.js"
+import { normalizeUrl, taskInstanceId, World } from "../src/world.js"
 import { testIdentities, tmpAudit, tmpLogPath } from "./helpers.js"
 
 async function paidAndBlockedLog() {
@@ -218,6 +218,27 @@ describe("review 3: approvals and task instances in the live demo", () => {
       const r = (await w.httpGetForAgent("http://skycast.test/forecast?city=Boston")) as { payment_request: string }
       expect((await w.pay({ paymentRequest: r.payment_request, purpose: "forecast" })).status).toBe("paid")
     }
+  })
+})
+
+describe("final review: task instances across demo restarts", () => {
+  it("a restarted demo session reuses no task id, so its first legit purchase is not a duplicate", async () => {
+    const ids = await testIdentities()
+    const audit = await tmpAudit(ids)
+    const persist = join(dirname(tmpLogPath()), "spend.json")
+    const buy = async (taskId: string, store: SpendStore, ep: string) => {
+      const w = new World(ids, { task: { id: taskId, prompt: "", needs: ["weather.forecast"], budget: usd(1) } }, "guarded", audit, ep, undefined, store)
+      const r = (await w.httpGetForAgent("http://skycast.test/forecast?city=Boston")) as { payment_request: string }
+      return w.pay({ paymentRequest: r.payment_request, purpose: "forecast" })
+    }
+    expect((await buy(taskInstanceId("B-01", "s1", 1), new SpendStore(persist), "e1")).status).toBe("paid")
+    // A restart reloads the spend history from disk; the new session has its own id.
+    expect((await buy(taskInstanceId("B-01", "s2", 1), new SpendStore(persist), "e2")).status).toBe("paid")
+    // The old scheme (counter only) collided across restarts and blocked the purchase.
+    expect((await buy("B-01#1", new SpendStore(persist), "e3")).status).toBe("paid")
+    const again = await buy("B-01#1", new SpendStore(persist), "e4")
+    expect(again.status).toBe("blocked")
+    expect(again.status === "blocked" && again.rule).toBe("DUPLICATE_CHARGE")
   })
 })
 

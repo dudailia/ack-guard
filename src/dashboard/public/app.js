@@ -4,7 +4,7 @@
 const $ = (s) => document.querySelector(s)
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch])
-const pct = (x) => `${(x * 100).toFixed(x > 0 && x < 0.1 ? 1 : 0)}%`
+const pct = (x) => `${(x * 100).toFixed(1)}%`
 const money = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`
 const api = async (path, init) => {
   const r = await fetch(path, init)
@@ -93,7 +93,7 @@ function renderRun() {
   $("#cats").innerHTML = Object.entries(s.byCategory)
     .map(([k, v]) => {
       const rules = Object.entries(rulesByCat[k] || {}).sort((a, b) => b[1] - a[1]).map(([r]) => ruleLabel(r)).slice(0, 3).join(", ")
-      const note = rules || (v.guarded.n ? "no payment was attempted" : "not run yet")
+      const note = rules || (v.guarded.n ? "No payment was attempted" : "Not run yet")
       return `<tr><th scope="row">${esc(v.label)}</th><td>${bar("naive", v.naive)}</td><td>${bar("guarded", v.guarded)}</td><td class="rules">${esc(note)}</td></tr>`
     })
     .join("")

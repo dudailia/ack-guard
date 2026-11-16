@@ -39,29 +39,36 @@ const page = await context.newPage()
 try {
   await page.goto(URL)
   await page.waitForSelector("#guided:not([hidden])")
-  await sleep(3000)
+  await sleep(5000)
   await page.click("#guided-btn")
   for (const n of [1, 2, 3]) {
     await page.waitForFunction((k) => {
       const el = document.querySelector(`#g${k}`)
       return !!el && el.textContent!.length > 0 && !el.classList.contains("running")
     }, n, { timeout: 180_000 })
-    await sleep(n === 3 ? 3500 : 2500)
+    await sleep(n === 3 ? 6000 : 4500)
   }
   // Open the replay of the blocked payment to show the rule and checks.
   const link = page.locator("#g2 [data-replay]")
   if (await link.count()) {
     await link.click()
-    await sleep(2500)
-    await page.mouse.wheel(0, 500)
-    await sleep(2500)
-    await page.mouse.wheel(0, 500)
-    await sleep(3000)
+    await sleep(4000)
+    await page.mouse.wheel(0, 450)
+    await sleep(4000)
+    await page.mouse.wheel(0, 450)
+    await sleep(4000)
   }
   // The scoreboard from the recorded benchmark.
   await page.locator(".score").scrollIntoViewIfNeeded()
   await page.evaluate(() => document.querySelector(".score")!.scrollIntoView({ block: "start" }))
+  await sleep(6000)
+  await page.mouse.wheel(0, 400)
   await sleep(5000)
+  // A still of the dashboard after the guided demo, for the README.
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await sleep(800)
+  await page.screenshot({ path: join(docs, "dashboard.png"), fullPage: true, clip: { x: 0, y: 0, width: 1280, height: 1500 } })
+  await sleep(1500)
 } finally {
   await context.close()
   await browser.close()

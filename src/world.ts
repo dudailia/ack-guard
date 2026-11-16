@@ -456,6 +456,11 @@ function factsForLog(f: PaymentFacts) {
  * parameter set (an added "refresh=1", or a value in different letter case)
  * is still a different URL to the guard; see DC-05.
  */
+/** A live task instance id: unique per session and per episode, since the spend history outlives a session. */
+export function taskInstanceId(base: string, sessionId: string, n: number): string {
+  return `${base}#${sessionId}-${n}`
+}
+
 export function normalizeUrl(raw: string): string {
   const s = raw.trim()
   const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `http://${s}`)

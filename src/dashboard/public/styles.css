@@ -121,7 +121,7 @@ section { background: var(--sheet); border: 1px solid var(--line); border-radius
 .big { font-size: clamp(3rem, 7vw, 5rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1; margin: 10px 0 6px; }
 .naive .big { color: var(--amber); }
 .guarded .big { color: var(--green); }
-.caption { color: var(--ink-2); font-size: 0.9rem; max-width: 34ch; }
+.caption { color: var(--ink-2); font-size: 0.9rem; max-width: 44ch; }
 .side dl { margin: 18px 0 0; display: grid; gap: 6px; }
 .side dl div { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); padding-top: 6px; }
 .side dt { color: var(--ink-2); font-size: 0.875rem; }

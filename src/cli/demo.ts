@@ -19,7 +19,7 @@ import { SpendStore } from "../policy/spend-store.js"
 import { approvalDemo } from "../redteam/demo-scenarios.js"
 import { ALL_SCENARIOS } from "../redteam/index.js"
 import { makeBuildCtx } from "../redteam/types.js"
-import type { Approver, Mode } from "../world.js"
+import { taskInstanceId, type Approver, type Mode } from "../world.js"
 import { loadEnv, localIdentities } from "./env.js"
 import { arg, c, flag } from "./util.js"
 
@@ -70,6 +70,9 @@ const dashboardApprover =
     })
 
 let episodeCounter = 0
+// Spend history persists across restarts, so task instance ids must be unique
+// across sessions too, not just within one.
+const sessionId = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 6)}`
 const ctx = makeBuildCtx(ids)
 async function run(scenarioId: string, mode: Mode) {
   const scenario = scenarios.find((s) => s.id === scenarioId)
@@ -78,7 +81,7 @@ async function run(scenarioId: string, mode: Mode) {
   const built = await scenario.build(ctx)
   // Each live episode is its own task instance, so running the same scenario
   // twice is two tasks (not a duplicate charge within one task).
-  const setup = { ...built, task: { ...built.task, id: `${built.task.id}#${episodeCounter}` } }
+  const setup = { ...built, task: { ...built.task, id: taskInstanceId(built.task.id, sessionId, episodeCounter) } }
   const done = runEpisode({
     ids,
     setup,
