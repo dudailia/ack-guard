@@ -39,7 +39,7 @@ I built the policy engine, the sandbox (merchants, ledger, receipt service), the
 
 **5. Which rule matters most, and why?**
 
-`REQ_PROVENANCE`. In ACK-Pay a legitimate quote exists because you asked a service for something and it answered 402. A payment request that shows up in an email, a web page or a JSON field is not a quote for anything you asked for. The guard sits in the HTTP client, so it knows which tokens came from 402s and from which URL. That one rule stops every fake invoice without understanding any text.
+`REQ_PROVENANCE`. In ACK-Pay a legitimate quote exists because you asked a service for something and it answered 402. A payment request that shows up in an email, a web page or a JSON field is not a quote for anything you asked for. The guard sits in the HTTP client, so it knows which tokens came from 402s and from which URL. In the recorded run that one rule refused every fake-invoice payment the agent attempted, without understanding any text.
 
 **6. An attacker controls a real merchant's server. What still protects the owner?**
 
@@ -57,7 +57,7 @@ What remains is in-policy over-purchasing, up to the budget.
 
 **7. What can the guard not catch?**
 
-- Purchases that are correctly priced, from an allowlisted merchant, for a declared capability, and within budget, but unnecessary. Examples are re-buying the same forecast through a slightly different URL (`DC-05`) and buying forecasts for three extra cities (`HI-05`). Damage is bounded by the task budget, not prevented.
+- Purchases that are correctly priced, from an allowlisted merchant, for a declared capability, and within budget, but unnecessary. Examples are re-buying the same forecast through a slightly different URL (`DC-05`, the guarded failure in the results: 2 of 5 runs, $0.50) and buying forecasts for three extra cities (`HI-05`, which qwen3 ignored, so only the scripted test shows it). Damage is bounded by the task budget, not prevented.
 - A wrong registry: if the operator registers the wrong payout account, the guard enforces the wrong thing.
 - Anything that bypasses `pay()`. In production the keys belong to the guard, not the agent.
 
@@ -77,7 +77,7 @@ The report also shows any harm flag, not just the declared goal, and the money m
 
 **10. Why do some attacks fail even against the naive agent?**
 
-The small model sometimes ignores the bait, or gives up. Those runs do not exercise the guard, and the report lists those scenarios instead of hiding them. A stronger model might take different baits; that is why a Claude run is the obvious next measurement.
+The small model sometimes ignores the bait, or gives up. Those runs do not exercise the guard, and the report lists those scenarios instead of hiding them. In the final run qwen3 ignored every hidden-instruction attack and four of five splitting attacks, so those rules are covered by a deterministic scripted agent in the tests, not by the measurement. A stronger model might take different baits; that is why a Claude run is the obvious next measurement.
 
 **11. Does the guard hurt legitimate use?**
 
