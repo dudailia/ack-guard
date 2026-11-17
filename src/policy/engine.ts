@@ -9,10 +9,11 @@
 // agentcommercekit/ack demos/payments/src/payment-policy.ts (MIT), which
 // checks a recipient allowlist and a per-transaction cap and notes that a real
 // spend control needs cumulative limits. This engine extends that pattern with
-// provenance, identity, price, purpose, duplicate, task-budget and rolling
-// daily-cap rules.
+// provenance, identity, price, purpose, item, duplicate, task-budget and
+// rolling daily-cap rules.
 
 import { formatAmount } from "../money.js"
+import { bindItem } from "./items.js"
 import type {
   Decision,
   PaidRecord,
@@ -34,6 +35,7 @@ export const RULE_TITLES: Record<RuleId, string> = {
   RECIPIENT_BINDING: "Recipient is the merchant's registered payout account",
   PRICE_BINDING: "Amount and currency match the registered price for the endpoint",
   PURPOSE_BINDING: "Endpoint capability is one the task declared it needs",
+  ITEM_BINDING: "Resource parameters match an item the task declared (e.g. which city)",
   DELEGATION_LIMITS: "Purchase fits every delegation link's capabilities and remaining budget",
   DUPLICATE_CHARGE: "Not a repeat purchase: same request, or more of a capability from one merchant than the task asked for",
   PER_PAYMENT_CAP: "Amount is within the per-payment cap",
@@ -50,6 +52,7 @@ export const RULE_ORDER: RuleId[] = [
   "RECIPIENT_BINDING",
   "PRICE_BINDING",
   "PURPOSE_BINDING",
+  "ITEM_BINDING",
   "DELEGATION_LIMITS",
   "DUPLICATE_CHARGE",
   "PER_PAYMENT_CAP",
@@ -175,7 +178,19 @@ export function evaluatePayment(
         : `capability ${endpoint.capability} is not among the task's declared needs [${task.needs.join(", ")}]`,
     )
 
-  // 8. Delegation limits. A sub-agent pays through a chain of links; each link
+  // 8. Item binding (task items are set by the human, not the LLM). The
+  // resource is the URL that returned the 402, which is also the only URL the
+  // receipt unlocks, so what passes here is what the merchant serves.
+  if (!endpoint) add("ITEM_BINDING", null, "requires a registered endpoint")
+  else {
+    const bought = history.payments
+      .filter((p) => p.taskId === task.id && p.capability === endpoint!.capability && p.url)
+      .map((p) => p.url!)
+    const b = bindItem(task.items, endpoint.capability, facts.provenance.url, bought)
+    add("ITEM_BINDING", b.ok, b.detail)
+  }
+
+  // 9. Delegation limits. A sub-agent pays through a chain of links; each link
   // may limit capabilities and budget. Spend under a link counts every payment
   // made under it, by the child or any of its descendants, so a purchase must
   // fit what every ancestor has left.
@@ -208,7 +223,7 @@ export function evaluatePayment(
     add("DELEGATION_LIMITS", !failed, failed ?? `fits every link: ${fits.join("; ")}`)
   }
 
-  // 9. Duplicate charge. Keyed on what is bought, not on the URL: the
+  // 10. Duplicate charge. Keyed on what is bought, not on the URL: the
   // merchant DID, the registered capability and the task. A task that needs a
   // capability more than once lists it that many times in its needs.
   if (!facts.requestSignature.ok) add("DUPLICATE_CHARGE", null, "no verified request")
@@ -240,7 +255,7 @@ export function evaluatePayment(
     add("DUPLICATE_CHARGE", !repeat, detail)
   }
 
-  // 9-11. Amount limits
+  // 11-14. Amount limits
   if (amount === undefined) {
     add("PER_PAYMENT_CAP", null, "no amount")
     add("TASK_BUDGET", null, "no amount")

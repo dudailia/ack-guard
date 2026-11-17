@@ -80,6 +80,10 @@ rules:
     title: Endpoint capability is one the task declared it needs
     plain: The agent can only buy the kinds of things the owner said the task needs.
     on_fail: deny
+  - id: ITEM_BINDING
+    title: Resource parameters match an item the task declared (e.g. which city)
+    plain: When the owner says exactly what a task needs, such as the forecast for Boston, the agent can only pay for that item. A forecast for another city, a translation into another language, or the right item with extra or repeated settings in its web address is refused.
+    on_fail: deny
   - id: DELEGATION_LIMITS
     title: Purchase fits every delegation link's capabilities and remaining budget
     plain: When an agent hands work to a sub-agent, each hand-off says what the sub-agent may buy and how much it may spend. A purchase must fit every hand-off in the chain, so a sub-agent can never spend more than its parent has left.

@@ -1,5 +1,6 @@
 // pnpm redteam [--model qwen3:8b|claude-...|scripted] [--runs 3] [--only FI,RS-01,benign] [--out dir] [--resume dir]
 //              [--patch-of results/<model>/<base run> --reason "why"]
+//              [--modes guarded] [--check <name> --reason "why"]
 import { join } from "node:path"
 import { ollamaAvailable, prepareModel, resolveModel } from "../agent/model.js"
 import { SUITES, selectScenarios, type Suite } from "../redteam/index.js"
@@ -22,6 +23,19 @@ if (resolveModel(modelId).provider === "ollama" && !(await ollamaAvailable(model
   console.error(c.red(`Ollama model ${modelId} is not available. Install Ollama and run: ollama pull ${modelId}`))
   process.exit(1)
 }
+// --modes guarded runs only the guarded agent (e.g. a regression check of benign tasks).
+const modes = (arg("modes") ?? "naive,guarded").split(",").map((m) => m.trim()) as ("naive" | "guarded")[]
+if (!modes.length || modes.some((m) => m !== "naive" && m !== "guarded")) {
+  console.error(c.red("--modes must be naive, guarded or naive,guarded"))
+  process.exit(1)
+}
+// --check <name>: a regression check, recorded and reported on its own, never
+// as the main or a suite benchmark.
+const check = arg("check")
+if (check && !arg("reason")) {
+  console.error(c.red("--check needs --reason, saying what the check is for"))
+  process.exit(1)
+}
 const thinking = arg("thinking") as "off" | "adaptive" | undefined
 if (thinking && thinking !== "off" && thinking !== "adaptive") {
   console.error(c.red("--thinking must be off or adaptive"))
@@ -32,7 +46,7 @@ const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").sl
 const outDir = arg("resume") ?? arg("out") ?? join("results", modelSlug(modelId), stamp)
 const ids = await localIdentities()
 
-console.log(c.bold(`ACK Guard red-team: ${scenarios.length} scenarios x 2 agents x ${runs} runs on ${model.label}`))
+console.log(c.bold(`ACK Guard red-team: ${scenarios.length} scenarios x ${modes.length} agent(s) x ${runs} runs on ${model.label}`))
 console.log(c.dim(`output: ${outDir}`))
 const t0 = Date.now()
 let firstDone: number | undefined
@@ -49,7 +63,12 @@ const summary = await runSuite({
   model,
   runs,
   outDir,
-  meta: { ...(patchOf ? { patchOf, patchReason: arg("reason") } : {}), ...(suite !== "main" ? { suite } : {}) },
+  modes,
+  meta: {
+    ...(patchOf ? { patchOf, patchReason: arg("reason") } : {}),
+    ...(check ? { check, checkReason: arg("reason") } : {}),
+    ...(suite !== "main" ? { suite } : {}),
+  },
   onEpisode: (row, done, total) => {
     firstDone ??= done - 1
     const s = row.score

@@ -115,7 +115,7 @@ describe("dashboard API", () => {
     const page = await (await app.request(`${BASE}/policy`)).text()
     expect(page).toContain("How each payment is checked")
     const cur = await (await app.request(`${BASE}/api/policy`)).json()
-    expect(cur.doc.rules.length).toBe(13)
+    expect(cur.doc.rules.length).toBe(14)
     const post = (path: string, body: unknown) => app.request(`${BASE}${path}`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify(body) })
 
     expect((await post("/api/policy/approve", { id: "pd_nope" })).status).toBe(400)

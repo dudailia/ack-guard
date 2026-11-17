@@ -40,6 +40,8 @@ export interface MerchantBehavior {
   extra402?: (path: string) => Record<string, unknown> | undefined
   /** Ask for payment again N times on a path even after a valid receipt. */
   rebill?: { path: string; times: number; message: string }
+  /** Answer 302 with this location instead of serving or quoting (e.g. a compromised merchant redirecting to another city). */
+  redirect?: (path: string, query: URLSearchParams) => string | undefined
   /** Extra fields merged into a successful (paid) response. */
   dataInjection?: (path: string, query: URLSearchParams) => Record<string, unknown> | undefined
 }
@@ -101,6 +103,9 @@ export function createMerchantApp(spec: MerchantSpec, deps: MerchantDeps) {
         if (!idv.ok) return c.json({ error: "invalid ACK-ID ControllerCredential" }, 401)
         verifiedCredentials.add(cred)
       }
+
+      const moved = b.redirect?.(ep.path, url.searchParams)
+      if (moved) return c.json({ moved }, 302, { location: moved })
 
       const auth = c.req.header("authorization")
       const receipt = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined

@@ -25,7 +25,7 @@ export function defaultRuns(base = "results"): string[] {
   for (const model of readdirSync(base)) {
     const mdir = join(base, model)
     if (!statSync(mdir).isDirectory()) continue
-    const full = runDirs(mdir).filter((r) => !readMeta(r).patchOf && !readMeta(r).suite)
+    const full = runDirs(mdir).filter((r) => !readMeta(r).patchOf && !readMeta(r).suite && !readMeta(r).check)
     if (full.length) runs.push(full[full.length - 1]!)
   }
   return runs
@@ -38,8 +38,25 @@ export function suiteRuns(suite: string, base = "results"): string[] {
   for (const model of readdirSync(base)) {
     const mdir = join(base, model)
     if (!statSync(mdir).isDirectory()) continue
-    const rs = runDirs(mdir).filter((r) => readMeta(r).suite === suite && !readMeta(r).patchOf)
+    const rs = runDirs(mdir).filter((r) => readMeta(r).suite === suite && !readMeta(r).patchOf && !readMeta(r).check)
     if (rs.length) runs.push(rs[rs.length - 1]!)
+  }
+  return runs
+}
+
+/** Every run of a separate suite in one model directory, oldest first (for before/after comparisons). */
+export function suiteHistory(suite: string, mdir: string): string[] {
+  return runDirs(mdir).filter((r) => readMeta(r).suite === suite && !readMeta(r).patchOf && !readMeta(r).check)
+}
+
+/** Regression-check runs (pnpm redteam --check <name>), oldest first, across model directories. */
+export function checkRuns(base = "results"): string[] {
+  if (!existsSync(base)) return []
+  const runs: string[] = []
+  for (const model of readdirSync(base)) {
+    const mdir = join(base, model)
+    if (!statSync(mdir).isDirectory()) continue
+    runs.push(...runDirs(mdir).filter((r) => readMeta(r).check))
   }
   return runs
 }

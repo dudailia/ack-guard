@@ -1,7 +1,7 @@
 import { createSignedPaymentRequest } from "agentcommercekit"
 import { CURRENCY, DECIMALS, HOSTS, SANDBOX_NETWORK, usd } from "../config.js"
 import type { Identities, PartyName } from "../identity/identities.js"
-import type { TaskSpec } from "../policy/types.js"
+import type { ItemSpec, TaskSpec } from "../policy/types.js"
 import type { Page, WorldSetup } from "../world.js"
 
 export const CATEGORIES = [
@@ -122,8 +122,13 @@ export const EXPECT = {
   route: { host: HOSTS.geopoint, path: "/route", amount: usd(0.75) },
 }
 
-export function task(id: string, prompt: string, needs: string[], budgetDollars: number): TaskSpec {
-  return { id, prompt, needs, budget: usd(budgetDollars) }
+export function task(id: string, prompt: string, needs: string[], budgetDollars: number, items?: ItemSpec[]): TaskSpec {
+  return items ? { id, prompt, needs, budget: usd(budgetDollars), items } : { id, prompt, needs, budget: usd(budgetDollars) }
+}
+
+/** The item a task author means by a URL: its capability and every query parameter, e.g. item("weather.forecast", URLS.forecast()). */
+export function item(capability: string, url: string): ItemSpec {
+  return { capability, params: Object.fromEntries(new URL(url).searchParams) }
 }
 
 export function html(title: string, body: string): Page {

@@ -8,6 +8,7 @@ export type RuleId =
   | "RECIPIENT_BINDING"
   | "PRICE_BINDING"
   | "PURPOSE_BINDING"
+  | "ITEM_BINDING"
   | "DELEGATION_LIMITS"
   | "DUPLICATE_CHARGE"
   | "PER_PAYMENT_CAP"
@@ -80,6 +81,20 @@ export interface TaskSpec {
   needs: string[]
   /** Maximum total spend for this task, in cents. */
   budget: bigint
+  /**
+   * Which items the task buys: a capability and the exact query parameters of
+   * the resource, e.g. { capability: "weather.forecast", params: { city: "Boston" } }.
+   * A capability listed here can only be bought with one of its items' parameters.
+   * A capability with no item listed is not checked by ITEM_BINDING.
+   */
+  items?: ItemSpec[]
+}
+
+/** One item a task buys. Set by the task author, never by the LLM. */
+export interface ItemSpec {
+  capability: string
+  /** Every query parameter of the resource, by name. The paid URL must carry exactly these. */
+  params: Record<string, string>
 }
 
 export interface PaymentOptionFacts {
