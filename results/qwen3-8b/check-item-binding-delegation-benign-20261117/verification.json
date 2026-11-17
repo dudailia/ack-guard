@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "runDir": "results/qwen3-8b/check-item-binding-delegation-benign-20261117",
+  "episodesChecked": 10,
+  "logOk": true,
+  "pinnedTo": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
+  "headHash": "bbe2490f4f5462871990a8a1ace0066b06f4d3590ee3bfb23ca6077798c4ddc9",
+  "problems": [],
+  "checkedAt": "2026-11-17T17:01:36.678Z"
+}

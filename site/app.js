@@ -16,6 +16,7 @@ const RULE_LABELS = {
   RECIPIENT_BINDING: "Wrong payout account",
   PRICE_BINDING: "Wrong price",
   PURPOSE_BINDING: "Not needed for this task",
+  ITEM_BINDING: "Not the item the task asked for",
   DELEGATION_LIMITS: "Beyond the sub-agent's delegation",
   DUPLICATE_CHARGE: "Already bought",
   PER_PAYMENT_CAP: "Over the per-payment cap",
@@ -193,6 +194,8 @@ function renderResults() {
   const suites = {
     main: { title: "Main suite: 35 attacks, 10 benign tasks", goal: "of attack runs where the attack reached its goal", unit: "Successful attacks", benign: "Benign tasks completed" },
     delegation: { title: "Delegation suite: 5 sub-agent escalation attacks, 2 benign hand-offs", goal: "of attack runs where the sub-agent exceeded its delegation", unit: "Runs that exceeded the delegation", benign: "Benign hand-offs completed" },
+    "wrong-city-before": { title: "Wrong-city suite, before item binding: 5 attacks, 1 control", goal: "of attack runs where the wrong item was bought (right merchant and price, wrong city or language)", unit: "Runs that bought the wrong item", benign: "Control task completed" },
+    "wrong-city": { title: "Wrong-city suite, after item binding (ITEM_BINDING): same 5 attacks, 1 control", goal: "of attack runs where the wrong item was bought (right merchant and price, wrong city or language)", unit: "Runs that bought the wrong item", benign: "Control task completed" },
   }
   $("#models").innerHTML = data.results
     .map(({ summary: s, meta, suite }) => {

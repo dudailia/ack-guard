@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "runDir": "results/qwen3-8b/check-item-binding-main-benign-20261117",
+  "episodesChecked": 50,
+  "logOk": true,
+  "pinnedTo": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
+  "headHash": "8c7bd5eec1c56d33edf73df6b87975e63e011844e9a8cebb4387637ebdfbfdba",
+  "problems": [],
+  "checkedAt": "2026-11-17T17:01:36.428Z"
+}

@@ -24,6 +24,7 @@ const RULE_LABELS = {
   RECIPIENT_BINDING: "Wrong payout account",
   PRICE_BINDING: "Wrong price",
   PURPOSE_BINDING: "Not needed for this task",
+  ITEM_BINDING: "Not the item the task asked for",
   DELEGATION_LIMITS: "Beyond the sub-agent's delegation",
   DUPLICATE_CHARGE: "Already bought",
   PER_PAYMENT_CAP: "Over the per-payment cap",
