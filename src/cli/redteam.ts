@@ -2,7 +2,7 @@
 //              [--patch-of results/<model>/<base run> --reason "why"]
 import { join } from "node:path"
 import { ollamaAvailable, prepareModel, resolveModel } from "../agent/model.js"
-import { selectScenarios } from "../redteam/index.js"
+import { SUITES, selectScenarios, type Suite } from "../redteam/index.js"
 import { runSuite } from "../redteam/runner.js"
 import { loadEnv, localIdentities, modelSlug } from "./env.js"
 import { arg, c } from "./util.js"
@@ -10,10 +10,11 @@ import { arg, c } from "./util.js"
 loadEnv()
 const modelId = arg("model", "qwen3:8b")!
 const runs = Number(arg("runs", "3"))
-// --suite delegation runs the sub-agent suite; it is recorded and reported separately.
-const suite = arg("suite", "main") as "main" | "delegation"
-if (suite !== "main" && suite !== "delegation") {
-  console.error(c.red("--suite must be main or delegation"))
+// --suite delegation runs the sub-agent suite and --suite wrong-city the wrong-item
+// suite; each is recorded and reported separately from the main benchmark.
+const suite = arg("suite", "main") as Suite
+if (!SUITES.includes(suite)) {
+  console.error(c.red(`--suite must be one of ${SUITES.join(", ")}`))
   process.exit(1)
 }
 const scenarios = selectScenarios(arg("only"), suite)
