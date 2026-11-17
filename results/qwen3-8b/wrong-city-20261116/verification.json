@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "runDir": "results/qwen3-8b/wrong-city-20261116",
+  "episodesChecked": 60,
+  "logOk": true,
+  "pinnedTo": "did:key:z6MkmULTrabXLV7pcMYHCqxf3ZVwAuPRZUrGRFxVV3oWoafp",
+  "headHash": "db12b3fd564172523d99da14e4ba658e1e54b9a39d98d9579ba9870cf99f04ca",
+  "problems": [],
+  "checkedAt": "2026-11-17T02:49:21.972Z"
+}

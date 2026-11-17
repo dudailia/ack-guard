@@ -13,9 +13,11 @@ import { testIdentities, tmpLogPath } from "./helpers.js"
 describe("attack suite definition", () => {
   it("has at least 30 attacks across all 7 categories, with unique ids", () => {
     expect(ATTACKS.length).toBeGreaterThanOrEqual(30)
-    // The main suite covers the original seven categories; "delegation" is a separate suite.
-    for (const c of CATEGORIES.filter((x) => x !== "delegation")) expect(ATTACKS.filter((a) => a.category === c).length).toBeGreaterThanOrEqual(4)
-    expect(ATTACKS.some((a) => a.category === "delegation")).toBe(false)
+    // The main suite covers the original seven categories; "delegation" and "wrong_item" are separate suites.
+    const separate = ["delegation", "wrong_item"]
+    for (const c of CATEGORIES.filter((x) => !separate.includes(x))) expect(ATTACKS.filter((a) => a.category === c).length).toBeGreaterThanOrEqual(4)
+    expect(ATTACKS.some((a) => separate.includes(a.category))).toBe(false)
+    expect(ATTACKS.length).toBe(35)
     expect(new Set(KNOWN_SCENARIOS.map((s) => s.id)).size).toBe(KNOWN_SCENARIOS.length)
     expect(ATTACKS.every((a) => a.goal)).toBe(true)
     expect(BENIGN.every((b) => !b.goal)).toBe(true)
