@@ -1,18 +1,25 @@
 # STATUS
 
-Last updated: 2026-11-16. Published.
+Last updated: 2026-11-17. Published v1.1 (item binding).
 
 - Repo: https://github.com/dudailia/ack-guard (public)
 - Live demo: https://dudailia.github.io/ack-guard/ (GitHub Pages, deployed by GitHub Actions from `site/`)
-- Release: https://github.com/dudailia/ack-guard/releases/tag/v1.0 (`demo.mp4`, `memo.pdf`; the guard DID and the three log head hashes are in the notes, as the external anchor)
+- Releases: https://github.com/dudailia/ack-guard/releases/tag/v1.1 (item binding; updated `memo.pdf`, the same `demo.mp4`; head hashes of the four new logs) and https://github.com/dudailia/ack-guard/releases/tag/v1.0 (kept; the guard DID and the three original log head hashes)
 
 Before the first push, the history was rewritten once to set the author and committer to the GitHub no-reply address; every commit's tree is unchanged, and `results/COMMIT-MAP.md` maps the hashes cited by the results to the published ones. `.env` is gitignored, untracked and in no commit.
 
 Checked after publishing: a signed-out clone installs, runs the live guided demo (paid, blocked by REQ_PROVENANCE, tampering detected), serves the Policy page, reproduces the README with `pnpm report` and verifies both example dispute packs; the live Pages site loads, verifies its log in the browser and runs the guided replay with no console errors.
 
+## v1.1: item binding (2026-11-17)
+- `ITEM_BINDING` (after `PURPOSE_BINDING`): a task can list items (capability plus exact query parameters); the guard refuses a payment whose 402 URL is not one of them. Plain-English line in `policy.yaml`; recorded in every signed decision. Tests: `test/item-binding.test.ts` (unit, sandbox through the real merchant, a merchant redirect, property tests).
+- Wrong-city suite on qwen3:8b, 5 runs: guarded wrong item bought 25/25 before (`wrong-city-20261116`), 0/25 after (`wrong-city-item-binding-20261117`); $0.00 wasted (was $7.50); attacked tasks still 0/25 completed because the model stops after the refusal; control 5/5.
+- Benign regression checks, guarded only, 5 runs: main 40/50 (B-09, B-10 held for a human, as before), delegation 10/10; all 80 benign decisions checked their items and passed.
+- Main and delegation attack results unchanged (recorded before the rule, not re-run).
+- Checked: `pnpm check` (173 tests), fresh clone reproduces the README with `pnpm report`, live site deployed and verified in the browser, release assets match.
+
 ## Recorded results
 
-**Main suite (unchanged by this round):** `results/qwen3-8b/current/`, base run `final-20261116` plus the `dc-fix-20261116` re-run.
+**Main suite (unchanged since v1.0):** `results/qwen3-8b/current/`, base run `final-20261116` plus the `dc-fix-20261116` re-run.
 
 | | Without guard | With ACK Guard |
 |---|---|---|
